@@ -129,6 +129,16 @@ func (c *codeTab) start(branch string) tea.Cmd {
 	return tea.Batch(c.spinner.Tick, c.fetchTreeCmd())
 }
 
+// refresh re-arms the tree-loading state and refetches, bypassing the
+// started guard start() uses (branch is already known past the first
+// load) -- called by RepoScreen's "r" handler when the code tab is
+// active, after it busts the tree cache entry.
+func (c *codeTab) refresh() tea.Cmd {
+	c.loadingTree = true
+	c.treeErr = nil
+	return tea.Batch(c.spinner.Tick, c.fetchTreeCmd())
+}
+
 func (c *codeTab) fetchTreeCmd() tea.Cmd {
 	owner, repo, branch, client := c.owner, c.repo, c.branch, c.client
 	return func() tea.Msg {

@@ -98,6 +98,16 @@ func (t *readmeTab) start() tea.Cmd {
 	})
 }
 
+// refresh re-arms the loading state and refetches -- called by
+// RepoScreen's "r" handler when the readme tab is active, after it busts
+// the cache entry.
+func (t *readmeTab) refresh() tea.Cmd {
+	t.loading = true
+	t.err = nil
+	t.noReadme = false
+	return t.start()
+}
+
 func (t *readmeTab) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case readmeMsg:

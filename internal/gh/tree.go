@@ -25,12 +25,18 @@ type Tree struct {
 	Truncated bool        `json:"truncated"`
 }
 
+// treePath builds the recursive tree endpoint URL -- factored out so
+// RefreshTree busts the exact same cache key Tree fetches under.
+func treePath(owner, repo, branch string) string {
+	return fmt.Sprintf("repos/%s/%s/git/trees/%s?recursive=1", owner, repo, escapeRef(branch))
+}
+
 // Tree fetches repos/{owner}/{repo}/git/trees/{branch}?recursive=1, serving
 // from cache when fresh. GitHub caps recursive listings; if Truncated is
 // true the response is incomplete and callers should fall back to Dir for
 // lazy per-directory listing of whichever parts of the tree matter.
 func (c *Client) Tree(owner, repo, branch string) (Tree, error) {
-	path := fmt.Sprintf("repos/%s/%s/git/trees/%s?recursive=1", owner, repo, escapeRef(branch))
+	path := treePath(owner, repo, branch)
 	if cached, ok := c.cache.get(path); ok {
 		if t, ok := cached.(Tree); ok {
 			return t, nil
@@ -42,6 +48,13 @@ func (c *Client) Tree(owner, repo, branch string) (Tree, error) {
 	}
 	c.cache.set(path, t)
 	return t, nil
+}
+
+// RefreshTree busts the tree cache entry, forcing the next Tree call to
+// hit the network. Used by the "r" refresh binding when the code tab is
+// active.
+func (c *Client) RefreshTree(owner, repo, branch string) {
+	c.cache.bust(treePath(owner, repo, branch))
 }
 
 // DirEntry is one entry from repos/{o}/{r}/contents/{path}: a single

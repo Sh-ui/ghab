@@ -19,11 +19,13 @@ import (
 // free: GH_TOKEN env, then gh's stored OAuth token) with a TTL cache in
 // front of it. A second client (raw) is identical except it defaults to
 // the "application/vnd.github.raw+json" Accept header, for the file/readme
-// fetchers that want file bytes back instead of a JSON envelope.
+// fetchers that want file bytes back instead of a JSON envelope. A third
+// (assets) defaults to "application/octet-stream", for DownloadAsset.
 type Client struct {
-	rest  *api.RESTClient
-	raw   *api.RESTClient
-	cache *cache
+	rest   *api.RESTClient
+	raw    *api.RESTClient
+	assets *api.RESTClient
+	cache  *cache
 }
 
 // NewClient builds a Client. ttl is the cache lifetime for every
@@ -39,7 +41,13 @@ func NewClient(ttl time.Duration) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gh auth: %w", err)
 	}
-	return &Client{rest: rest, raw: raw, cache: newCache(ttl)}, nil
+	assets, err := api.NewRESTClient(api.ClientOptions{
+		Headers: map[string]string{"Accept": "application/octet-stream"},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gh auth: %w", err)
+	}
+	return &Client{rest: rest, raw: raw, assets: assets, cache: newCache(ttl)}, nil
 }
 
 // NotFoundError marks a 404 from the GitHub API so callers can render
