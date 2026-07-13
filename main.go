@@ -58,12 +58,19 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "ghab: config warning: %s\n", w)
 	}
 
+	colorMode := config.ColorMode()
+	readmeStylePath, readmeStyleWarnings := config.ResolveReadmeStyle(cfg.Readme, colorMode)
+	for _, w := range readmeStyleWarnings {
+		fmt.Fprintf(os.Stderr, "ghab: config warning: %s\n", w)
+	}
+
 	if checkConfig {
-		printCheckConfig(path, cfg, paletteResult, resolvedTheme, warnings, paletteWarnings, themeWarnings)
+		printCheckConfig(path, cfg, paletteResult, resolvedTheme, colorMode, readmeStylePath,
+			warnings, paletteWarnings, themeWarnings, readmeStyleWarnings)
 		return 0
 	}
 
-	theme := style.New(resolvedTheme)
+	theme := style.New(resolvedTheme, paletteResult.Colors)
 
 	client, err := gh.NewClient(cfg.Behavior.CacheTTLDuration)
 	if err != nil {
@@ -76,7 +83,7 @@ func run(args []string) int {
 		jumpTo = fs.Arg(0)
 	}
 
-	app := ui.NewApp(cfg, theme, client, jumpTo)
+	app := ui.NewApp(cfg, theme, client, readmeStylePath, jumpTo)
 	p := tea.NewProgram(app, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "ghab: %v\n", err)

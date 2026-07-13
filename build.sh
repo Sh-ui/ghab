@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Cross-compile ghab for both ghab hosts (Mac + Pi, both aarch64)
-# into dist/. Static builds: CGO_ENABLED=0, no libc dependency at runtime.
+# Cross-compile ghab for both ghab hosts into dist/: the Mac at its
+# native arch (this Mac is Intel -- don't assume arm64) and the device
+# Pi (linux-arm64). Static builds: CGO_ENABLED=0, no libc dependency.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -17,7 +18,7 @@ build() {
 	CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -o "$out" .
 }
 
-build darwin arm64
+build darwin "$(go env GOHOSTARCH)"
 build linux arm64
 
 echo "done: $(ls dist)"

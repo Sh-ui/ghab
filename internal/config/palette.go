@@ -42,21 +42,34 @@ type PaletteResult struct {
 	Source string
 }
 
+// vaultSearchRoots returns the vault root candidates every "auto" resolver
+// in ghab searches, in order: $GHAB_ROOT, ~/dev-root,
+// ~/Developer/dev-root. Both the palette resolver (config/ subdir) and
+// the readme-style resolver (ghab/styles/ subdir) build their search paths
+// from this same root list, per BUILD.md.
+func vaultSearchRoots() []string {
+	var roots []string
+	if v := os.Getenv("GHAB_ROOT"); v != "" {
+		roots = append(roots, v)
+	}
+	home, err := os.UserHomeDir()
+	if err == nil {
+		roots = append(roots,
+			filepath.Join(home, "dev-root"),
+			filepath.Join(home, "Developer", "dev-root"),
+		)
+	}
+	return roots
+}
+
 // autoSearchPaths returns the "auto" search order from BUILD.md:
 // $GHAB_ROOT/config/ombre-palette.json,
 // ~/dev-root/config/ombre-palette.json,
 // ~/Developer/dev-root/config/ombre-palette.json.
 func autoSearchPaths() []string {
 	var paths []string
-	if v := os.Getenv("GHAB_ROOT"); v != "" {
-		paths = append(paths, filepath.Join(v, "config", "ombre-palette.json"))
-	}
-	home, err := os.UserHomeDir()
-	if err == nil {
-		paths = append(paths,
-			filepath.Join(home, "dev-root", "config", "ombre-palette.json"),
-			filepath.Join(home, "Developer", "dev-root", "config", "ombre-palette.json"),
-		)
+	for _, root := range vaultSearchRoots() {
+		paths = append(paths, filepath.Join(root, "config", "ombre-palette.json"))
 	}
 	return paths
 }

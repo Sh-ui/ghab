@@ -23,18 +23,20 @@ type App struct {
 	stack         []Screen
 }
 
-// NewApp builds the root model with Home as the base of the stack. If
+// NewApp builds the root model with Home as the base of the stack.
+// readmeStylePath is the glamour stylesheet resolved once at app startup
+// (main.go); it threads down to every Repo screen the app ever pushes. If
 // jumpTo is non-empty ("owner/repo"), a Repo screen is pushed on top so
 // the app opens straight into it (main.go's positional-arg jump).
-func NewApp(cfg config.Config, theme style.Theme, client *gh.Client, jumpTo string) *App {
+func NewApp(cfg config.Config, theme style.Theme, client *gh.Client, readmeStylePath, jumpTo string) *App {
 	a := &App{
 		cfg:    cfg,
 		theme:  theme,
 		client: client,
-		stack:  []Screen{NewHomeScreen(cfg, theme, client)},
+		stack:  []Screen{NewHomeScreen(cfg, theme, client, readmeStylePath)},
 	}
 	if owner, repo, ok := splitOwnerRepo(jumpTo); ok {
-		a.stack = append(a.stack, NewRepoScreen(cfg, theme, client, owner, repo))
+		a.stack = append(a.stack, NewRepoScreen(cfg, theme, client, readmeStylePath, owner, repo))
 	}
 	return a
 }

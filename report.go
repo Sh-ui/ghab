@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/Sh-ui/ghab/internal/config"
 )
@@ -11,7 +12,8 @@ import (
 // and every warning collected while loading it. Called for
 // --check-config; also useful as a paste-in-an-issue diagnostic dump.
 func printCheckConfig(path string, cfg config.Config, palette config.PaletteResult, theme config.ResolvedTheme,
-	warnings, paletteWarnings, themeWarnings []config.Warning) {
+	colorMode, readmeStylePath string,
+	warnings, paletteWarnings, themeWarnings, readmeStyleWarnings []config.Warning) {
 
 	fmt.Printf("ghab config check\n")
 	fmt.Printf("  file:    %s", path)
@@ -33,7 +35,16 @@ func printCheckConfig(path string, cfg config.Config, palette config.PaletteResu
 
 	fmt.Println("  [readme]")
 	fmt.Printf("    style_dark  = %s\n", cfg.Readme.StyleDark)
-	fmt.Printf("    style_light = %s\n\n", cfg.Readme.StyleLight)
+	fmt.Printf("    style_light = %s\n", cfg.Readme.StyleLight)
+	fmt.Printf("    color-mode  = %s\n", colorMode)
+	if mode, ok := strings.CutPrefix(readmeStylePath, "standard:"); ok || readmeStylePath == "" {
+		if mode == "" {
+			mode = "dark"
+		}
+		fmt.Printf("    resolved    -> glamour built-in %q style (fallback)\n\n", mode)
+	} else {
+		fmt.Printf("    resolved    -> %s\n\n", readmeStylePath)
+	}
 
 	fmt.Println("  [behavior]")
 	fmt.Printf("    clone_dir = %s\n", cfg.Behavior.CloneDir)
@@ -48,7 +59,7 @@ func printCheckConfig(path string, cfg config.Config, palette config.PaletteResu
 	fmt.Printf("    open=%s profile=%s clone=%s edit=%s web=%s refresh=%s\n\n",
 		cfg.Keys.Open, cfg.Keys.Profile, cfg.Keys.Clone, cfg.Keys.Edit, cfg.Keys.Web, cfg.Keys.Refresh)
 
-	all := append(append(append([]config.Warning{}, warnings...), paletteWarnings...), themeWarnings...)
+	all := append(append(append(append([]config.Warning{}, warnings...), paletteWarnings...), themeWarnings...), readmeStyleWarnings...)
 	if len(all) == 0 {
 		fmt.Println("  warnings: (none)")
 		return

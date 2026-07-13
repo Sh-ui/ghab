@@ -16,12 +16,14 @@ import (
 // repoTabs are the tab bar entries, in order. l/h cycle through them.
 var repoTabs = []string{"readme", "code", "releases", "issues", "prs"}
 
-// tabPlaceholder is the placeholder body shown in each tab's viewport
-// until its real content lands (M2 for readme/code, M3 for
-// releases/issues/prs).
+// placeholderTabs are the tabs still driven by an inert viewport --
+// they gain real fetchers in M3. readme and code are handled by their own
+// dedicated sub-models (readmeTab, codeTab) as of M2.
+var placeholderTabs = []string{"releases", "issues", "prs"}
+
+// tabPlaceholder is the placeholder body shown in each placeholder tab's
+// viewport until its real content lands in M3.
 var tabPlaceholder = map[string]string{
-	"readme":   "readme rendering arrives in M2 (glamour + ombre stylesheet).",
-	"code":     "file tree + preview arrives in M2 (chroma + gutter).",
 	"releases": "release list + assets arrive in M3.",
 	"issues":   "issue list + detail view arrive in M3.",
 	"prs":      "pull request list + detail view arrive in M3.",
@@ -49,16 +51,20 @@ type RepoScreen struct {
 	spinner spinner.Model
 
 	active        int
-	viewports     map[string]viewport.Model
+	viewports     map[string]viewport.Model // placeholderTabs only (releases/issues/prs -- M3)
+	readme        *readmeTab
+	code          *codeTab
 	width, height int
 }
 
 // NewRepoScreen builds a Repo screen for owner/repo. Fetching starts in
-// Init.
-func NewRepoScreen(cfg config.Config, theme style.Theme, client *gh.Client, owner, repo string) *RepoScreen {
+// Init. readmeStylePath is the glamour stylesheet resolved once at app
+// startup (main.go, via config.ResolveReadmeStyle) -- "" means fall back
+// to glamour's built-in "dark" standard style.
+func NewRepoScreen(cfg config.Config, theme style.Theme, client *gh.Client, readmeStylePath, owner, repo string) *RepoScreen {
 	sp := spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(theme.Spinner))
-	vps := make(map[string]viewport.Model, len(repoTabs))
-	for _, t := range repoTabs {
+	vps := make(map[string]viewport.Model, len(placeholderTabs))
+	for _, t := range placeholderTabs {
 		vp := viewport.New(0, 0)
 		vp.SetContent(theme.MutedText.Render(tabPlaceholder[t]))
 		vps[t] = vp
@@ -72,6 +78,8 @@ func NewRepoScreen(cfg config.Config, theme style.Theme, client *gh.Client, owne
 		loading:   true,
 		spinner:   sp,
 		viewports: vps,
+		readme:    newReadmeTab(theme, client, readmeStyleOption{stylePath: readmeStylePath}, owner, repo),
+		code:      newCodeTab(cfg, theme, client, owner, repo),
 	}
 }
 
@@ -85,7 +93,7 @@ func (r *RepoScreen) fetchCmd() tea.Cmd {
 }
 
 func (r *RepoScreen) Init() tea.Cmd {
-	return tea.Batch(r.spinner.Tick, r.fetchCmd())
+	return tea.Batch(r.spinner.Tick, r.fetchCmd(), r.readme.start())
 }
 
 func (r *RepoScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
@@ -93,23 +101,28 @@ func (r *RepoScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		r.width, r.height = msg.Width, msg.Height
 		r.resizeViewports()
-		// no return: fall through so the active viewport also sees the message
+		// no early return: fall through to the shared dispatch below so
+		// both sub-tabs' viewports also see the resize even when inactive.
 
 	case repoMetaMsg:
 		r.loading = false
 		r.err = msg.err
-		if msg.err == nil {
-			r.meta = msg.meta
-		}
-		return r, nil
-
-	case spinner.TickMsg:
-		if !r.loading {
+		if msg.err != nil {
 			return r, nil
 		}
-		var cmd tea.Cmd
-		r.spinner, cmd = r.spinner.Update(msg)
-		return r, cmd
+		r.meta = msg.meta
+		// The code tab can't fetch its tree until it knows the default
+		// branch; it starts here rather than in Init.
+		return r, r.code.start(r.meta.DefaultBranch)
+
+	case spinner.TickMsg:
+		if r.loading {
+			var cmd tea.Cmd
+			r.spinner, cmd = r.spinner.Update(msg)
+			// fall through: the readme/code tabs' own spinners (separate
+			// IDs) also need a look at every tick while they're loading.
+			return r, tea.Batch(cmd, r.readme.Update(msg), r.code.Update(msg))
+		}
 
 	case tea.KeyMsg:
 		switch {
@@ -129,13 +142,29 @@ func (r *RepoScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			r.err = nil
 			return r, tea.Batch(r.spinner.Tick, r.fetchCmd())
 		}
+
+		// Not a chrome key -- only the active tab sees it, so an
+		// inactive tab's keymap can't steal keystrokes meant for
+		// whichever tab is on screen.
+		switch repoTabs[r.active] {
+		case "readme":
+			return r, r.readme.Update(msg)
+		case "code":
+			return r, r.code.Update(msg)
+		default:
+			vp := r.viewports[repoTabs[r.active]]
+			var cmd tea.Cmd
+			vp, cmd = vp.Update(msg)
+			r.viewports[repoTabs[r.active]] = vp
+			return r, cmd
+		}
 	}
 
-	vp := r.viewports[repoTabs[r.active]]
-	var cmd tea.Cmd
-	vp, cmd = vp.Update(msg)
-	r.viewports[repoTabs[r.active]] = vp
-	return r, cmd
+	// Fetch results, resizes, and other non-key, non-chrome messages
+	// always reach both sub-tabs (regardless of which is active) so a
+	// background load for the inactive tab still completes -- per-tab
+	// state persists across switches (BUILD.md's Async pattern).
+	return r, tea.Batch(r.readme.Update(msg), r.code.Update(msg))
 }
 
 func (r *RepoScreen) resizeViewports() {
@@ -150,6 +179,8 @@ func (r *RepoScreen) resizeViewports() {
 		vp.Height = vpHeight
 		r.viewports[t] = vp
 	}
+	r.readme.resize(r.width, vpHeight)
+	r.code.resize(r.width, vpHeight)
 }
 
 func (r *RepoScreen) View(width, height int) string {
@@ -172,7 +203,15 @@ func (r *RepoScreen) View(width, height int) string {
 	b.WriteString("\n\n")
 	b.WriteString(style.TabBar(r.theme, repoTabs, r.active))
 	b.WriteString("\n\n")
-	b.WriteString(r.viewports[repoTabs[r.active]].View())
+
+	switch repoTabs[r.active] {
+	case "readme":
+		b.WriteString(r.readme.View())
+	case "code":
+		b.WriteString(r.code.View())
+	default:
+		b.WriteString(r.viewports[repoTabs[r.active]].View())
+	}
 
 	return b.String()
 }
@@ -203,11 +242,34 @@ func (r *RepoScreen) headerLines() []string {
 	return lines
 }
 
+// Footer builds this screen's contextual keybind hints from the live
+// keymap, prefixed with hints specific to whichever tab is active
+// (BUILD.md: "code tab shows: j/k move, enter open, e edit, tab focus,
+// l/h tab, q quit; readme tab: j/k scroll, l/h tab, ..."). "tab" (pane
+// focus) is bubbletea's literal Tab key, not a config-remappable binding
+// -- there's no [keys] entry for it (BUILD.md's [keys] table has no
+// pane-focus slot), so it's hardcoded here the same way Ctrl+C-to-quit is
+// hardcoded in app.go.
 func (r *RepoScreen) Footer() []style.KeyHint {
-	return []style.KeyHint{
-		{Keys: r.cfg.Keys.TabPrev + "/" + r.cfg.Keys.TabNext, Label: "tab"},
-		{Keys: r.cfg.Keys.Refresh, Label: "refresh"},
-		{Keys: r.cfg.Keys.Back, Label: "back"},
-		{Keys: r.cfg.Keys.Quit, Label: "quit"},
+	var hints []style.KeyHint
+
+	switch repoTabs[r.active] {
+	case "readme":
+		hints = append(hints, style.KeyHint{Keys: r.cfg.Keys.Down + "/" + r.cfg.Keys.Up, Label: "scroll"})
+	case "code":
+		hints = append(hints,
+			style.KeyHint{Keys: r.cfg.Keys.Down + "/" + r.cfg.Keys.Up, Label: "move"},
+			style.KeyHint{Keys: r.cfg.Keys.Open, Label: "open"},
+			style.KeyHint{Keys: r.cfg.Keys.Edit, Label: "edit"},
+			style.KeyHint{Keys: "tab", Label: "focus"},
+		)
 	}
+
+	hints = append(hints,
+		style.KeyHint{Keys: r.cfg.Keys.TabPrev + "/" + r.cfg.Keys.TabNext, Label: "tab"},
+		style.KeyHint{Keys: r.cfg.Keys.Refresh, Label: "refresh"},
+		style.KeyHint{Keys: r.cfg.Keys.Back, Label: "back"},
+		style.KeyHint{Keys: r.cfg.Keys.Quit, Label: "quit"},
+	)
+	return hints
 }

@@ -21,18 +21,23 @@ type HomeScreen struct {
 	theme  style.Theme
 	client *gh.Client
 
+	// readmeStylePath is threaded into every Repo screen this screen
+	// pushes -- resolved once at app startup (main.go), not re-resolved
+	// per repo.
+	readmeStylePath string
+
 	input  textinput.Model
 	notice string
 }
 
 // NewHomeScreen builds the Home screen.
-func NewHomeScreen(cfg config.Config, theme style.Theme, client *gh.Client) *HomeScreen {
+func NewHomeScreen(cfg config.Config, theme style.Theme, client *gh.Client, readmeStylePath string) *HomeScreen {
 	ti := textinput.New()
 	ti.Placeholder = "owner/repo"
 	ti.Prompt = "> "
 	ti.CharLimit = 256
 	ti.Focus()
-	return &HomeScreen{cfg: cfg, theme: theme, client: client, input: ti}
+	return &HomeScreen{cfg: cfg, theme: theme, client: client, readmeStylePath: readmeStylePath, input: ti}
 }
 
 func (h *HomeScreen) Init() tea.Cmd {
@@ -49,7 +54,7 @@ func (h *HomeScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			value := strings.TrimSpace(h.input.Value())
 			if owner, repo, ok := splitOwnerRepo(value); ok {
 				h.notice = ""
-				return h, pushScreen(NewRepoScreen(h.cfg, h.theme, h.client, owner, repo))
+				return h, pushScreen(NewRepoScreen(h.cfg, h.theme, h.client, h.readmeStylePath, owner, repo))
 			}
 			if value != "" {
 				h.notice = "search comes in M4"

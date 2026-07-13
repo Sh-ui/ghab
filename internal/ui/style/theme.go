@@ -5,6 +5,7 @@
 package style
 
 import (
+	"github.com/alecthomas/chroma/v2"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Sh-ui/ghab/internal/config"
@@ -51,10 +52,17 @@ type Theme struct {
 	Selection     lipgloss.Style
 	Spinner       lipgloss.Style
 	ErrorText     lipgloss.Style
+
+	// Chroma is the code tab's syntax-highlight style, built from the same
+	// resolved ombre palette (see ChromaStyle) -- used by both color modes
+	// since accents are luma-balanced for both grounds.
+	Chroma *chroma.Style
 }
 
-// New builds a Theme from a resolved config theme.
-func New(t config.ResolvedTheme) Theme {
+// New builds a Theme from a resolved config theme and the resolved ombre
+// palette (for ChromaStyle -- code-preview syntax colors need palette names
+// like "purple"/"blue" that ResolvedTheme doesn't carry).
+func New(t config.ResolvedTheme, palette config.Palette) Theme {
 	th := Theme{
 		Accent:       lipgloss.Color(t.Accent),
 		AccentAlt:    lipgloss.Color(t.AccentAlt),
@@ -82,6 +90,8 @@ func New(t config.ResolvedTheme) Theme {
 	th.Selection = lipgloss.NewStyle().Background(th.SelectionBg).Foreground(th.Fg)
 	th.Spinner = lipgloss.NewStyle().Foreground(th.Accent)
 	th.ErrorText = lipgloss.NewStyle().Foreground(th.ClosedMarker)
+
+	th.Chroma = ChromaStyle(palette)
 
 	return th
 }
