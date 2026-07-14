@@ -15,9 +15,9 @@ import (
 	"github.com/Sh-ui/ghab/internal/ui/style"
 )
 
-// version is bumped by hand per release; ghab has no build-info wiring
-// yet (M5 territory).
-const version = "0.1.0-m1"
+// version is stamped by build.sh via -ldflags "-X main.version=...";
+// "dev" means a plain `go build` without it.
+var version = "dev"
 
 func main() {
 	os.Exit(run(os.Args[1:]))

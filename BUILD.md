@@ -152,6 +152,10 @@ Clone = `gh repo clone {o}/{r} {clone_dir}/{r}` via ExecProcess (inherits gh aut
 - **M4 hop+search**: profile screen, user repos, home search, screen stack polish (deep back-chains).
 - **M5 ship**: clone flow, wend `o` hook, build.sh + deploy to Pi, install symlink wiring, docs page + tasks + ledger (via the docs pipeline), BOTH-MODE visual check on device (light + dark -- the tui-visual-style bar).
 
+## Deployment (two hosts, one artifact each)
+
+`ghab/build.sh` on the Mac builds `dist/ghab-darwin-<hostarch>` (this Mac is Intel -> amd64) and `dist/ghab-linux-arm64`. `dist/` is gitignored; binaries move by scp, not git. Pi deploy: `scp ghab/dist/ghab-linux-arm64 lab:dev-root/ghab/dist/` then `bin/install-pi.sh` symlinks it to `/usr/local/bin/ghab` (flit's skip-if-unbuilt pattern) and links `~/.config/ghab/config.toml` -> `config/ghab/config.toml`. Mac: `bin/install-mac.sh` does the same with the darwin binary. Config + readme-style "auto" search resolves through the vault clone on each host once this branch merges; until then the compiled defaults + palette fallback keep the binary functional (fail-soft by design).
+
 ## Non-goals (genesis)
 
 No writes to GitHub (no issue creation, no comments, no stars) -- read-only browser first. No notifications (gh-notify exists). No local git operations beyond clone. No multi-forge abstraction.

@@ -2,6 +2,9 @@ package ui
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -20,6 +23,12 @@ var repoTabs = []string{"readme", "code", "releases", "issues", "prs"}
 // repoMetaMsg carries the async result of fetching repos/{owner}/{repo}.
 type repoMetaMsg struct {
 	meta gh.RepoMeta
+	err  error
+}
+
+// cloneDoneMsg carries the result of the suspended `gh repo clone` run.
+type cloneDoneMsg struct {
+	dest string
 	err  error
 }
 
@@ -42,12 +51,19 @@ type RepoScreen struct {
 	theme  style.Theme
 	client *gh.Client
 
-	owner, repo string
+	owner, repo     string
+	readmeStylePath string
 
 	loading bool
 	err     error
 	meta    gh.RepoMeta
 	spinner spinner.Model
+
+	// notice is the one-line status under the tab bar (clone results,
+	// web-open errors); noticeErr renders it in the error color.
+	notice    string
+	noticeErr bool
+	cloning   bool
 
 	active   int
 	readme   *readmeTab
@@ -69,18 +85,19 @@ func NewRepoScreen(cfg config.Config, theme style.Theme, client *gh.Client, read
 	sp := spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(theme.Spinner))
 	styleOpt := readmeStyleOption{stylePath: readmeStylePath}
 	return &RepoScreen{
-		cfg:      cfg,
-		theme:    theme,
-		client:   client,
-		owner:    owner,
-		repo:     repo,
-		loading:  true,
-		spinner:  sp,
-		readme:   newReadmeTab(theme, client, styleOpt, owner, repo),
-		code:     newCodeTab(cfg, theme, client, owner, repo),
-		releases: newReleasesTab(cfg, theme, client, styleOpt, owner, repo),
-		issues:   newIssuesTab(cfg, theme, client, styleOpt, owner, repo, issueKindIssue),
-		prs:      newIssuesTab(cfg, theme, client, styleOpt, owner, repo, issueKindPR),
+		cfg:             cfg,
+		theme:           theme,
+		client:          client,
+		owner:           owner,
+		repo:            repo,
+		readmeStylePath: readmeStylePath,
+		loading:         true,
+		spinner:         sp,
+		readme:          newReadmeTab(theme, client, styleOpt, owner, repo),
+		code:            newCodeTab(cfg, theme, client, owner, repo),
+		releases:        newReleasesTab(cfg, theme, client, styleOpt, owner, repo),
+		issues:          newIssuesTab(cfg, theme, client, styleOpt, owner, repo, issueKindIssue),
+		prs:             newIssuesTab(cfg, theme, client, styleOpt, owner, repo, issueKindPR),
 	}
 }
 
@@ -134,6 +151,21 @@ func (r *RepoScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		// branch; it starts here rather than in Init.
 		return r, r.code.start(r.meta.DefaultBranch)
 
+	case cloneDoneMsg:
+		r.cloning = false
+		if msg.err != nil {
+			r.notice, r.noticeErr = "clone failed: "+msg.err.Error(), true
+		} else {
+			r.notice, r.noticeErr = "cloned to "+msg.dest, false
+		}
+		return r, nil
+
+	case webDoneMsg:
+		if msg.err != nil {
+			r.notice, r.noticeErr = "open failed: "+msg.err.Error(), true
+		}
+		return r, nil
+
 	case issuesFetchMsg:
 		// Split the one shared fetch into each tab's own message so
 		// issuesTab stays symmetric with the other sub-models (an
@@ -177,6 +209,15 @@ func (r *RepoScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			return r, nil
 		case matchesKey(msg, r.cfg.Keys.Refresh):
 			return r, r.refreshActive()
+		case matchesKey(msg, r.cfg.Keys.Profile):
+			return r, pushScreen(NewProfileScreen(r.cfg, r.theme, r.client, r.readmeStylePath, r.owner))
+		case matchesKey(msg, r.cfg.Keys.Clone):
+			return r, r.cloneCmd()
+		case matchesKey(msg, r.cfg.Keys.Web):
+			if r.meta.HTMLURL != "" {
+				return r, openURLCmd(r.cfg, r.meta.HTMLURL)
+			}
+			return r, nil
 		}
 
 		// Not a chrome key -- only the active tab sees it, so an
@@ -232,6 +273,27 @@ func (r *RepoScreen) activeDetailTab() detailTab {
 		return t
 	}
 	return nil
+}
+
+// cloneCmd runs `gh repo clone owner/repo <clone_dir>/repo` with the TUI
+// suspended (tea.ExecProcess), so gh's own progress output is visible and
+// its auth/protocol config is reused. An existing destination short-
+// circuits to a notice instead of letting the clone fail.
+func (r *RepoScreen) cloneCmd() tea.Cmd {
+	if r.cloning {
+		return nil
+	}
+	dest := filepath.Join(gh.ExpandPath(r.cfg.Behavior.CloneDir), r.repo)
+	if _, err := os.Stat(dest); err == nil {
+		r.notice, r.noticeErr = "already exists: "+dest, false
+		return nil
+	}
+	r.cloning = true
+	r.notice, r.noticeErr = "", false
+	cmd := exec.Command("gh", "repo", "clone", r.owner+"/"+r.repo, dest)
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return cloneDoneMsg{dest: dest, err: err}
+	})
 }
 
 // refreshActive busts the caches relevant to the active tab and refetches
@@ -296,7 +358,17 @@ func (r *RepoScreen) View(width, height int) string {
 	b.WriteString(style.Frame(r.theme, r.meta.FullName, r.headerLines(), width))
 	b.WriteString("\n\n")
 	b.WriteString(style.TabBar(r.theme, repoTabs, r.active))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
+	// The line between tab bar and body doubles as the notice line
+	// (clone/web results) -- blank when there's nothing to say, so the
+	// body height stays constant either way.
+	switch {
+	case r.notice != "" && r.noticeErr:
+		b.WriteString(r.theme.ErrorText.Render(truncateTo(r.notice, width)))
+	case r.notice != "":
+		b.WriteString(r.theme.AccentText.Render(truncateTo(r.notice, width)))
+	}
+	b.WriteString("\n")
 
 	switch repoTabs[r.active] {
 	case "readme":
@@ -369,6 +441,9 @@ func (r *RepoScreen) Footer() []style.KeyHint {
 
 	hints = append(hints,
 		style.KeyHint{Keys: r.cfg.Keys.TabPrev + "/" + r.cfg.Keys.TabNext, Label: "tab"},
+		style.KeyHint{Keys: r.cfg.Keys.Profile, Label: "profile"},
+		style.KeyHint{Keys: r.cfg.Keys.Clone, Label: "clone"},
+		style.KeyHint{Keys: r.cfg.Keys.Web, Label: "web"},
 		style.KeyHint{Keys: r.cfg.Keys.Refresh, Label: "refresh"},
 		style.KeyHint{Keys: r.cfg.Keys.Back, Label: "back"},
 		style.KeyHint{Keys: r.cfg.Keys.Quit, Label: "quit"},

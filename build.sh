@@ -15,7 +15,7 @@ build() {
 	local arch="$2"
 	local out="dist/ghab-${os}-${arch}"
 	echo "building ${out} (version ${version})"
-	CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -o "$out" .
+	CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -ldflags "-X main.version=${version}" -o "$out" .
 }
 
 build darwin "$(go env GOHOSTARCH)"

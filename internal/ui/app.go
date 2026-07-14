@@ -26,8 +26,9 @@ type App struct {
 // NewApp builds the root model with Home as the base of the stack.
 // readmeStylePath is the glamour stylesheet resolved once at app startup
 // (main.go); it threads down to every Repo screen the app ever pushes. If
-// jumpTo is non-empty ("owner/repo"), a Repo screen is pushed on top so
-// the app opens straight into it (main.go's positional-arg jump).
+// jumpTo is non-empty, a Repo screen ("owner/repo") or Profile screen
+// (bare "owner") is pushed on top so the app opens straight into it
+// (main.go's positional-arg jump).
 func NewApp(cfg config.Config, theme style.Theme, client *gh.Client, readmeStylePath, jumpTo string) *App {
 	a := &App{
 		cfg:    cfg,
@@ -37,6 +38,8 @@ func NewApp(cfg config.Config, theme style.Theme, client *gh.Client, readmeStyle
 	}
 	if owner, repo, ok := splitOwnerRepo(jumpTo); ok {
 		a.stack = append(a.stack, NewRepoScreen(cfg, theme, client, readmeStylePath, owner, repo))
+	} else if jumpTo != "" && !strings.Contains(jumpTo, "/") {
+		a.stack = append(a.stack, NewProfileScreen(cfg, theme, client, readmeStylePath, jumpTo))
 	}
 	return a
 }
@@ -63,6 +66,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pushScreenMsg:
 		a.stack = append(a.stack, msg.screen)
+		// Every repo visit lands in Home's session-only recents list,
+		// regardless of which screen pushed it (home input, profile hop,
+		// search result).
+		if r, ok := msg.screen.(*RepoScreen); ok {
+			if h, ok := a.stack[0].(*HomeScreen); ok {
+				h.recordVisit(r.owner + "/" + r.repo)
+			}
+		}
 		return a, msg.screen.Init()
 	case popScreenMsg:
 		if len(a.stack) > 1 {
