@@ -39,7 +39,16 @@ func (s *PRDetailScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		s.width, s.height = msg.Width, msg.Height
-		bodyRows := s.height - 2 // this screen's own "owner/repo #N" header + blank
+		// This screen's own "owner/repo #N" header + blank (2) plus the
+		// app's footer-line reservation (1) -- matching MyPRsScreen's
+		// height-3 convention (header + blank + footer). View() renders
+		// from s.height directly (WindowSizeMsg carries the raw terminal
+		// height, not App's already-reserved bodyHeight -- see app.go's
+		// pushScreenMsg comment), so leaving this at height-2 overflows
+		// the app's real per-render budget by exactly one line, and
+		// bubbletea's renderer keeps the LAST height lines -- clipping the
+		// header this screen exists to keep visible off the top.
+		bodyRows := s.height - 3
 		if bodyRows < 1 {
 			bodyRows = 1
 		}

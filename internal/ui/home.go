@@ -80,9 +80,17 @@ func (h *HomeScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			return h, nil
 		case matchesKey(msg, h.cfg.Keys.Quit) && h.input.Value() == "":
 			return h, tea.Quit
-		case matchesKey(msg, h.cfg.Keys.MyPRs) && h.input.Value() == "":
-			// Only fires on an empty input so typing a literal "p" into
-			// an owner/repo or search query still works as text entry.
+		case matchesKey(msg, h.cfg.Keys.MyPRs):
+			// Default binding is a chord (ctrl+p), not a bare letter --
+			// deliberately, so it can fire regardless of what's already
+			// typed (or being typed) into the input without ever eating a
+			// character of real text entry. A bare-letter default ("p")
+			// was tried first and rejected: gated to an empty input, it
+			// still stole the very first keystroke of any owner/repo or
+			// search value starting with that letter (pigeon, piper,
+			// prusa3d, pytorch, ...), and textinput only inserts on
+			// printable-rune key events, so a chord like this never
+			// reaches it as text no matter the input's contents.
 			return h, pushScreen(NewMyPRsScreen(h.cfg, h.theme, h.client, h.readmeStylePath))
 		}
 	}
@@ -127,12 +135,13 @@ func (h *HomeScreen) recordVisit(fullName string) {
 func (h *HomeScreen) Footer() []style.KeyHint {
 	hints := []style.KeyHint{
 		{Keys: h.cfg.Keys.Open, Label: "go"},
+		// my_prs is a chord by default (ctrl+p), not a bare letter, so
+		// unlike quit it works no matter what's typed into the input --
+		// its hint isn't gated on an empty value the way quit's is.
+		{Keys: h.cfg.Keys.MyPRs, Label: "my PRs"},
 	}
 	if h.input.Value() == "" {
-		hints = append(hints,
-			style.KeyHint{Keys: h.cfg.Keys.MyPRs, Label: "my PRs"},
-			style.KeyHint{Keys: h.cfg.Keys.Quit, Label: "quit"},
-		)
+		hints = append(hints, style.KeyHint{Keys: h.cfg.Keys.Quit, Label: "quit"})
 	} else {
 		hints = append(hints, style.KeyHint{Keys: h.cfg.Keys.Back, Label: "clear"})
 	}

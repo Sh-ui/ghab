@@ -23,28 +23,42 @@ const (
 	prViewDiff
 )
 
+// diffHorizontalStep is how many columns h/l scroll the diff viewport per
+// press. No [keys] slot governs the step size, same "no natural config
+// slot" precedent as the h/l binding itself (see prDetailModel's struct
+// comment) -- a diff line runs well past this screen's width, so a
+// single-column step would take many presses to reveal truncated content.
+const diffHorizontalStep = 10
+
 // prConvMsg / prFilesMsg / prThreadsMsg carry the async results of
 // prDetailModel's three parallel fetches (conversation body+comments,
-// changed-files list, line-anchored review comments). Each carries the PR
-// number so a stale response (a since-closed detail, re-opened on a
-// different number before the old fetch lands) is dropped rather than
-// misapplied -- same guard style as codeTab's fileMsg/dirMsg.
+// changed-files list, line-anchored review comments). Each carries the
+// owner/repo/number the fetch was made for so a stale response (a
+// since-closed detail, re-opened on a different PR before the old fetch
+// lands) is dropped rather than misapplied -- same guard style as
+// codeTab's fileMsg/dirMsg. Owner/repo ride along, not just number: the
+// cross-repo my-PRs flow can open repoA#5 then repoB#5 before repoA's
+// fetch lands, and a number-only guard would misapply repoA's response to
+// repoB's screen on that same-number collision.
 type prConvMsg struct {
-	number int
-	detail gh.IssueDetail
-	err    error
+	owner, repo string
+	number      int
+	detail      gh.IssueDetail
+	err         error
 }
 
 type prFilesMsg struct {
-	number int
-	files  []gh.PullFile
-	err    error
+	owner, repo string
+	number      int
+	files       []gh.PullFile
+	err         error
 }
 
 type prThreadsMsg struct {
-	number  int
-	threads []gh.FileThread
-	err     error
+	owner, repo string
+	number      int
+	threads     []gh.FileThread
+	err         error
 }
 
 // prDetailModel is a PR's detail view -- conversation (body + comments,
@@ -58,13 +72,18 @@ type prThreadsMsg struct {
 // swapping it in for the plain body+comments viewport that issues use,
 // per BUILD.md's "new view AND existing per-repo PRs tab" requirement.
 //
-// Horizontal scroll in the conversation and diff views rides bubbles
-// viewport's own built-in keymap (h/l and left/right, alongside j/k for
-// vertical) -- there is no ghab [keys] slot for it, matching the "tab"
-// pane-focus precedent (codeTab, releasesTab) of leaving mechanics with
-// no natural config slot hardcoded. When this tab is embedded in
-// RepoScreen's PRs tab, RepoScreen must not steal h/l for tab-switching
-// while a diff is open -- see issuesTab.wantsHorizontalKeys.
+// Horizontal scroll in the diff view rides bubbles viewport's own
+// built-in keymap (h/l and left/right, alongside j/k for vertical) -- but
+// that keymap's ScrollLeft/ScrollRight are no-ops until horizontalStep is
+// set (bubbles v1.0.0 disables h-scroll by default), so diffVp gets
+// SetHorizontalStep at construction below. There is no ghab [keys] slot
+// for the h/l binding itself, matching the "tab" pane-focus precedent
+// (codeTab, releasesTab) of leaving mechanics with no natural config slot
+// hardcoded. The conversation view never needs this: its content is
+// glamour-rendered and word-wrapped to width, so no line ever exceeds the
+// viewport and there's nothing an h-scroll would reveal. When the diff
+// view is embedded in RepoScreen's PRs tab, RepoScreen must not steal h/l
+// for tab-switching while it's open -- see issuesTab.wantsHorizontalKeys.
 type prDetailModel struct {
 	cfg      config.Config
 	theme    style.Theme
@@ -95,17 +114,20 @@ type prDetailModel struct {
 	threadsErr     error
 	threadsByPath  map[string][]gh.LineThread
 
-	view              prView
-	diffFile          *gh.PullFile
-	diffVp            viewport.Model
-	renderedDiffFile  string
-	renderedDiffWidth int
+	view                prView
+	diffFile            *gh.PullFile
+	diffVp              viewport.Model
+	renderedDiffFile    string
+	renderedDiffWidth   int
+	renderedDiffContent string
 
 	width, rows int
 }
 
 func newPRDetailModel(cfg config.Config, theme style.Theme, client *gh.Client, styleOpt readmeStyleOption, owner, repo string, number int) *prDetailModel {
 	sp := spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(theme.Spinner))
+	diffVp := viewport.New(0, 0)
+	diffVp.SetHorizontalStep(diffHorizontalStep)
 	return &prDetailModel{
 		cfg:               cfg,
 		theme:             theme,
@@ -120,7 +142,7 @@ func newPRDetailModel(cfg config.Config, theme style.Theme, client *gh.Client, s
 		filesLoading:      true,
 		threadsLoading:    true,
 		convVp:            viewport.New(0, 0),
-		diffVp:            viewport.New(0, 0),
+		diffVp:            diffVp,
 		renderedConvWidth: -1,
 		renderedDiffWidth: -1,
 	}
@@ -135,11 +157,11 @@ func (p *prDetailModel) start() tea.Cmd {
 		p.spinner.Tick,
 		func() tea.Msg {
 			d, err := client.IssueDetail(owner, repo, number)
-			return prConvMsg{number: number, detail: d, err: err}
+			return prConvMsg{owner: owner, repo: repo, number: number, detail: d, err: err}
 		},
 		func() tea.Msg {
 			files, err := client.PullFiles(owner, repo, number, perPage)
-			return prFilesMsg{number: number, files: files, err: err}
+			return prFilesMsg{owner: owner, repo: repo, number: number, files: files, err: err}
 		},
 		func() tea.Msg {
 			comments, err := client.PullReviewComments(owner, repo, number)
@@ -147,7 +169,7 @@ func (p *prDetailModel) start() tea.Cmd {
 			if err == nil {
 				threads = gh.GroupReviewThreads(comments)
 			}
-			return prThreadsMsg{number: number, threads: threads, err: err}
+			return prThreadsMsg{owner: owner, repo: repo, number: number, threads: threads, err: err}
 		},
 	)
 }
@@ -169,7 +191,7 @@ func (p *prDetailModel) atDiff() bool { return p.view == prViewDiff }
 func (p *prDetailModel) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case prConvMsg:
-		if msg.number != p.number {
+		if msg.number != p.number || msg.owner != p.owner || msg.repo != p.repo {
 			return nil
 		}
 		p.convLoading = false
@@ -182,7 +204,7 @@ func (p *prDetailModel) Update(msg tea.Msg) tea.Cmd {
 		return nil
 
 	case prFilesMsg:
-		if msg.number != p.number {
+		if msg.number != p.number || msg.owner != p.owner || msg.repo != p.repo {
 			return nil
 		}
 		p.filesLoading = false
@@ -194,7 +216,7 @@ func (p *prDetailModel) Update(msg tea.Msg) tea.Cmd {
 		return nil
 
 	case prThreadsMsg:
-		if msg.number != p.number {
+		if msg.number != p.number || msg.owner != p.owner || msg.repo != p.repo {
 			return nil
 		}
 		p.threadsLoading = false
@@ -415,20 +437,22 @@ func (p *prDetailModel) renderMarkdown(body string) string {
 // applyDiffContent (re-)renders the diff viewport's content for the
 // currently-selected file, cached by (file, width) -- the diff lines
 // themselves don't need re-wrapping on a width change (bubbles viewport
-// truncates/h-scrolls raw lines natively, never wrapping them), but the
-// glamour-rendered review-comment bodies interleaved with them do.
+// truncates lines rather than wrapping them, and h-scrolls via
+// SetHorizontalStep -- see diffHorizontalStep), but the glamour-rendered
+// review-comment bodies interleaved with them do.
 func (p *prDetailModel) applyDiffContent() {
 	if p.diffFile == nil || p.diffVp.Width <= 0 {
 		return
 	}
 	if p.renderedDiffFile == p.diffFile.Filename && p.renderedDiffWidth == p.diffVp.Width {
-		p.diffVp.SetContent(p.buildDiffContent())
+		p.diffVp.SetContent(p.renderedDiffContent)
 		return
 	}
 	content := p.buildDiffContent()
 	p.diffVp.SetContent(content)
 	p.renderedDiffFile = p.diffFile.Filename
 	p.renderedDiffWidth = p.diffVp.Width
+	p.renderedDiffContent = content
 }
 
 // buildDiffContent renders one file's diff: a binary/pure-rename

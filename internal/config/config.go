@@ -118,7 +118,7 @@ func Defaults() Config {
 			Edit:    "e",
 			Web:     "o",
 			Refresh: "r",
-			MyPRs:   "p",
+			MyPRs:   "ctrl+p",
 		},
 	}
 }

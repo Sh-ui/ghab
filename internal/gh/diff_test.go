@@ -52,6 +52,21 @@ func TestParsePatch(t *testing.T) {
 				{Kind: DiffAdd, Text: "+added", NewLine: 0},
 			},
 		},
+		{
+			// A "\ No newline at end of file" marker describes the line
+			// above it, not a line of its own -- it must not advance
+			// either line counter, or every line after it in the hunk
+			// would be miscounted by one (the bug this case guards).
+			name:  "no-newline marker does not skew subsequent line numbers",
+			patch: "@@ -1,2 +1,2 @@\n-old\n\\ No newline at end of file\n+new\n context",
+			want: []DiffLine{
+				{Kind: DiffHunkHeader, Text: "@@ -1,2 +1,2 @@"},
+				{Kind: DiffRemove, Text: "-old", OldLine: 1},
+				{Kind: DiffContext, Text: `\ No newline at end of file`},
+				{Kind: DiffAdd, Text: "+new", NewLine: 1},
+				{Kind: DiffContext, Text: " context", OldLine: 2, NewLine: 2},
+			},
+		},
 	}
 
 	for _, tc := range cases {

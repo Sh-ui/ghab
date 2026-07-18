@@ -31,6 +31,13 @@ type DiffLine struct {
 	NewLine int
 }
 
+// noNewlineMarker is unified diff's marker for a hunk's final line having
+// no trailing newline in the source file -- it appears mid-hunk (right
+// after the add/remove/context line it describes) and is not itself a
+// line of either file's content, so it must not advance either line
+// counter (see ParsePatch).
+const noNewlineMarker = `\ No newline at end of file`
+
 // ParsePatch splits a GitHub "patch" string (a per-file unified diff body
 // -- GitHub's /pulls/{n}/files response omits the "--- a/f" / "+++ b/f"
 // file header lines other diff tools include, starting straight at the
@@ -49,6 +56,11 @@ func ParsePatch(patch string) []DiffLine {
 		case strings.HasPrefix(l, "@@"):
 			oldLine, newLine = parseHunkHeader(l)
 			lines = append(lines, DiffLine{Kind: DiffHunkHeader, Text: l})
+		case strings.HasPrefix(l, noNewlineMarker):
+			// Not a line of either file -- record it (still rendered as
+			// context) but don't advance oldLine/newLine, or every
+			// subsequent line in the hunk would be off by one.
+			lines = append(lines, DiffLine{Kind: DiffContext, Text: l})
 		case strings.HasPrefix(l, "+"):
 			lines = append(lines, DiffLine{Kind: DiffAdd, Text: l, NewLine: newLine})
 			newLine++
