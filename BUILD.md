@@ -78,6 +78,8 @@ editor      = "micro"              # open-file hook; %s substituted with path, e
 open_url    = "auto"               # "auto" = wend if on PATH, else open/xdg-open
 page_size   = 30                   # issues/releases page length
 cache_ttl   = "5m"                 # in-memory per-endpoint TTL
+my_prs_query       = "is:pr is:open involves:@me"  # search/issues query behind "my PRs" (issue #11)
+diff_context_lines = 3             # unchanged lines shown per side of a PR diff hunk; 0 = no trimming
 
 [keys]
 # every binding remappable; defaults below are the compiled defaults (one key per line -- TOML)
@@ -95,6 +97,7 @@ clone = "c"
 edit = "e"
 web = "o"
 refresh = "r"
+my_prs = "p"
 ```
 
 Palette JSON shape (do not fork values -- read the file): `{"cream":"#F8F2E9","slate":"#797B86","umbra":"#1F1E1D","coffee":"#AD774E","teal":"#00ACC1","green":"#43A047","red":"#ED4B40","yellow":"#BF9800", ...}`. Compiled fallback = this exact set, used only when no palette file is found.
@@ -124,6 +127,9 @@ One `Client` wrapping `api.DefaultRESTClient()`. Typed structs only for fields t
 | Issue detail | `.../issues/{n}` + `.../issues/{n}/comments` | body + comments through glamour |
 | User | `users/{u}` + `users/{u}/repos?sort=updated&per_page=100` | profile hop |
 | Search | `search/repositories?q=...` | HARD debounce: fire only on enter, never per-keystroke (30 req/min bucket) |
+| My PRs | `search/issues?q={my_prs_query}` | cross-repo, issue #11; same 30 req/min bucket -- fires once per screen push, never re-fires on scroll |
+| PR files | `.../pulls/{n}/files?per_page=...` | filename, status, +/- counts, per-file unified diff ("patch"); GitHub omits `patch` for binary files and pure renames |
+| PR review comments | `.../pulls/{n}/comments?per_page=100` | line-anchored (path + line/original_line + side); grouped client-side by file:line, see `gh.GroupReviewThreads` |
 
 Rate limits are a non-issue at human browsing pace (5000/hr authed) except search -- hence enter-to-search. Errors: 404 -> "not found or no access"; network fail -> inline error line + retry key, never a crash.
 
@@ -136,13 +142,35 @@ App shell = one root model owning a screen stack (push/pop, `esc` pops). Screens
 3. **Code tab** -- left pane tree (collapsed dirs, lazy expand), right pane file preview (chroma, line-number gutter). `enter` on file focuses preview; `e` opens in editor.
 4. **File view / editor hook** -- `e` writes blob to `$XDG_CACHE_HOME/ghab/{owner}/{repo}/{path}` (real filename so micro gets syntax), then `tea.ExecProcess(exec.Command(editor, path))`, resume TUI on exit.
 5. **Releases tab** -- list release -> expand body (glamour) + assets; asset `enter` downloads to clone_dir/downloads with progress.
-6. **Issues / PRs tabs** -- list (state bullet in open/closed marker colors, #num, title, author, age) -> detail view w/ comments.
+6. **Issues / PRs tabs** -- list (state bullet in open/closed marker colors, #num, title, author, age) -> detail view w/ comments. A PR row's detail is the fuller `prDetailModel` (conversation / files-changed / diff / review threads) -- see "PR-view extension" below.
 7. **Profile** -- user card (name, bio, followers, location) + their repos list (sorted updated) -> `enter` enters repo. THIS IS THE HOP -- must be seamless both directions.
 8. **Help** -- full keymap overlay, generated from live (config-merged) keymap.
+9. **My PRs** -- cross-repo screen (issue #11): every open PR authored by or requesting review from the signed-in user, across every repo, one search fetch per push. Row grammar: state bullet, repo, #num, title, age. `enter` pushes the PR detail screen (same `prDetailModel` as the per-repo PRs tab).
 
 Async pattern: every fetch = tea.Cmd returning a typed msg; spinner while pending; all list state survives tab switches (models kept per tab, not rebuilt).
 
 Clone = `gh repo clone {o}/{r} {clone_dir}/{r}` via ExecProcess (inherits gh auth + protocol config); on success show path + hint `cd` line printed after quit.
+
+## PR-view extension (issue #11, branch `ghab/pr-view`)
+
+Motivated verbatim by Ian's issue #11: "Viewing my pull requests and going through them in gh -- gh-dash sucks ... I need to be able to browse and read pull requests on the lab pie without having to go into Piper and right now that's not easy." **Mac-built and gate-verified only -- no device pass yet** (label per every claim below: applied, device-UNVERIFIED, needs a both-modes visual check per tui-visual-style.md before it's called done).
+
+**Cross-repo my-PRs screen** (`internal/ui/myprs.go`, `MyPRsScreen`) -- pushed from Home via the new `my_prs` key (default `p`, only fires on an empty input so typing a literal "p" into a query still works). One `search/issues` fetch (`[behavior].my_prs_query`, default `is:pr is:open involves:@me`) lists every open PR authored by or requesting review from the signed-in user, across every repo -- ghab's only screen that isn't scoped to one repo. Same hard search-endpoint debounce as the existing repo search (fires once per push, never per keystroke). Row grammar: state bullet, repo, `#num`, title, age. `enter` pushes the PR detail screen.
+
+**PR detail** (`internal/ui/prdetail.go`, `prDetailModel`) -- a reusable sub-model, not a `Screen` itself, used in two places per the build brief ("new view AND existing per-repo PRs tab"): `PRDetailScreen` (`prdetail_screen.go`) wraps one for the my-PRs hop; `issuesTab` (kind `issueKindPR`) owns one directly, swapping it in for the old body+comments-only detail the PRs tab used to show (real issues, kind `issueKindIssue`, are untouched -- they have no files/diff and keep the original detail view exactly as M3 shipped it). Three sub-views, cycled with `tab` (conversation <-> files; diff is entered from a file, `esc` steps it back to files, `esc` from conversation/files exits detail to the list -- same "back pops one level" convention as the rest of the screen stack):
+
+- **Conversation** -- unchanged from M3: title/state/author/age header + body + comments through glamour.
+- **Files changed** (`repos/{o}/{r}/pulls/{n}/files`) -- one row per file: a one-letter status marker (`A`/`D`/`M`/`R`, colored from the existing open/closed/accent theme slots -- no new colors invented) + filename (`old -> new` for a rename) + `+adds -dels`, or `(binary)` / `(renamed, no changes)` when GitHub omits the patch. `enter` opens that file's diff.
+- **Diff** -- GitHub's per-file unified diff (`patch` field), parsed by `gh.ParsePatch` and trimmed by `gh.TrimContext` (`[behavior].diff_context_lines`, default 3) into add/remove/hunk/context lines, colored via the existing open/closed/accent theme slots (never a new accent). Review threads (see below) render inline right after the diff line they anchor to. Rendered into a bubbles `viewport`, which is what gives this view its scrolling for free: **wide lines truncate via the viewport's native horizontal scroll (`h`/`l` or the arrow keys) rather than wrapping** -- there is no `[keys]` slot for horizontal scroll (same "no natural config slot" precedent as the `tab` pane-focus key), so it's the viewport's own hardcoded keymap. When this view is open inside the per-repo PRs tab, `RepoScreen` must not steal `h`/`l` for tab-switching first -- see `issuesTab.wantsHorizontalKeys` / `RepoScreen.activeWantsHorizontalKeys`.
+- **Review threads** (`repos/{o}/{r}/pulls/{n}/comments`) -- grouped by file, then by (side, line) via `gh.GroupReviewThreads`, rendered through glamour, indented under the diff line they match. A comment whose line was trimmed out of the shown context (or is otherwise stale) still renders -- in a trailer at the end of that file's diff -- rather than being silently dropped.
+
+**Edge cases handled**: binary files and pure renames (GitHub omits `patch` for both; distinguished via `PullFile.IsBinary`/`IsPureRename`) get a placeholder instead of an empty diff pane; a malformed hunk header falls back to line-number 0 rather than erroring (fail-soft, matching config's philosophy); review comments on a since-force-pushed line fall back to `original_line` for grouping.
+
+**Config-first** (`[behavior]` in `config/ghab/config.toml`): `my_prs_query` (the search filter -- swap `involves:@me` for `author:@me` or `review-requested:@me` to narrow it) and `diff_context_lines` (0 disables trimming). Both fail-soft (bad value keeps the compiled default + warns, verified via `--check-config`); `my_prs` joins `[keys]` the same way. Read-only throughout -- no approve/comment/merge, per the genesis non-goals below.
+
+**App-level bug found and fixed while building this** (`internal/ui/app.go`, `App.Update`'s `pushScreenMsg` case): bubbletea delivers `tea.WindowSizeMsg` exactly once at program start (plus on a real terminal resize) -- it does not replay on every screen push. Every screen pushed AFTER that first message has already landed -- i.e. essentially all interactive navigation: typing into Home, a search/profile hop, opening a PR -- never learned the terminal's real size, so its own cached width/height stayed at zero forever and every sub-pane it laid out rendered degenerate (0-width code-tab boxes, blank issues/releases/prs lists), even though the outer frame still looked fine (`View`'s width/height come from the App as render parameters, not from the screen's own state). Only the CLI `ghab owner/repo` jump-arg path worked, because that path's target screen is already on the stack when the one real message arrives. Confirmed both the break and the fix live (PTY-driven, real `gh api` calls, this repo) -- pushing `RepoScreen` from Home's typed input rendered blank code/issues/prs panes before the fix and real content after it. Fixed by replaying the last known size into a freshly pushed screen before its `Init()` cmds run. This would otherwise have made `MyPRsScreen`/`PRDetailScreen` (built here, reached exactly this way) non-functional in practice despite passing every gate.
+
+**Convention note (flagged, not resolved here)**: this extension's new list rows (my-PRs, files-changed) keep ghab's existing full-width `selection_bg` bar for the cursor row, matching every other list already in this app (issues, releases, code tree, repo browser) -- not the newer "▸ + bold, no background bars" TUI grammar noted in some of Ian's other recent tools. Introducing a second selection idiom inside one app seemed worse than a brief inconsistency across the fleet; if Ian wants the newer grammar, it should land as one consistency pass over every ghab list at once, not piecemeal per feature.
 
 ## Milestones
 
@@ -151,6 +179,7 @@ Clone = `gh repo clone {o}/{r} {clone_dir}/{r}` via ExecProcess (inherits gh aut
 - **M3 releases+issues+prs**: lists, detail views, asset download w/ arch marker.
 - **M4 hop+search**: profile screen, user repos, home search, screen stack polish (deep back-chains).
 - **M5 ship**: clone flow, wend `o` hook, build.sh + deploy to Pi, install symlink wiring, docs page + tasks + ledger (via the docs pipeline), BOTH-MODE visual check on device (light + dark -- the tui-visual-style bar).
+- **M6 PR-view extension** (issue #11, branch `ghab/pr-view`): my-PRs cross-repo screen, files-changed + diff + review-thread PR detail (both the new screen and the existing per-repo PRs tab). Mac-built and gate-verified (`go build`/`go test`/`go vet` all green); **device-unverified** -- no both-modes visual pass on the device yet. See "PR-view extension" below.
 
 ## Deployment (two hosts, one artifact each)
 

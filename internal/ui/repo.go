@@ -201,10 +201,10 @@ func (r *RepoScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 				return r, tab.Update(msg)
 			}
 			return r, popScreen()
-		case matchesKey(msg, r.cfg.Keys.TabNext):
+		case matchesKey(msg, r.cfg.Keys.TabNext) && !r.activeWantsHorizontalKeys():
 			r.active = (r.active + 1) % len(repoTabs)
 			return r, nil
-		case matchesKey(msg, r.cfg.Keys.TabPrev):
+		case matchesKey(msg, r.cfg.Keys.TabPrev) && !r.activeWantsHorizontalKeys():
 			r.active = (r.active - 1 + len(repoTabs)) % len(repoTabs)
 			return r, nil
 		case matchesKey(msg, r.cfg.Keys.Refresh):
@@ -275,6 +275,19 @@ func (r *RepoScreen) activeDetailTab() detailTab {
 	return nil
 }
 
+// activeWantsHorizontalKeys reports whether the active tab currently
+// wants h/l for itself (a PR's diff sub-view, scrolled via bubbles
+// viewport's own keymap -- see issuesTab.wantsHorizontalKeys) rather than
+// tab-switching. RepoScreen's TabNext/TabPrev bindings default to l/h, so
+// without this guard they'd steal the diff view's horizontal scroll
+// before it ever reached the prs tab.
+func (r *RepoScreen) activeWantsHorizontalKeys() bool {
+	if repoTabs[r.active] == "prs" {
+		return r.prs.wantsHorizontalKeys()
+	}
+	return false
+}
+
 // cloneCmd runs `gh repo clone owner/repo <clone_dir>/repo` with the TUI
 // suspended (tea.ExecProcess), so gh's own progress output is visible and
 // its auth/protocol config is reused. An existing destination short-
@@ -317,10 +330,21 @@ func (r *RepoScreen) refreshActive() tea.Cmd {
 		r.client.RefreshReleases(r.owner, r.repo, r.cfg.Behavior.PageSize)
 		cmds = append(cmds, r.releases.refresh())
 	case "issues", "prs":
-		r.client.RefreshIssues(r.owner, r.repo, r.cfg.Behavior.PageSize)
-		r.issues.loading = true
-		r.prs.loading = true
-		cmds = append(cmds, r.fetchIssuesCmd())
+		tab := r.issues
+		if repoTabs[r.active] == "prs" {
+			tab = r.prs
+		}
+		// A PR's own detail view open (conversation/files/diff) refreshes
+		// itself instead of the list underneath it -- "r" acts on whatever
+		// is actually on screen.
+		if dc := tab.refreshDetail(); dc != nil {
+			cmds = append(cmds, dc)
+		} else {
+			r.client.RefreshIssues(r.owner, r.repo, r.cfg.Behavior.PageSize)
+			r.issues.loading = true
+			r.prs.loading = true
+			cmds = append(cmds, r.fetchIssuesCmd())
+		}
 	}
 	return tea.Batch(cmds...)
 }
@@ -439,8 +463,14 @@ func (r *RepoScreen) Footer() []style.KeyHint {
 		hints = append(hints, r.prs.footerHints(r.cfg)...)
 	}
 
+	// The h/l tab-switch hint would be actively misleading while a PR
+	// diff sub-view has claimed h/l for its own horizontal scroll (see
+	// activeWantsHorizontalKeys) -- h/l genuinely doesn't switch tabs in
+	// that state, so don't advertise that it does.
+	if !r.activeWantsHorizontalKeys() {
+		hints = append(hints, style.KeyHint{Keys: r.cfg.Keys.TabPrev + "/" + r.cfg.Keys.TabNext, Label: "tab"})
+	}
 	hints = append(hints,
-		style.KeyHint{Keys: r.cfg.Keys.TabPrev + "/" + r.cfg.Keys.TabNext, Label: "tab"},
 		style.KeyHint{Keys: r.cfg.Keys.Profile, Label: "profile"},
 		style.KeyHint{Keys: r.cfg.Keys.Clone, Label: "clone"},
 		style.KeyHint{Keys: r.cfg.Keys.Web, Label: "web"},

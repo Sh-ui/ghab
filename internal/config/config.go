@@ -52,6 +52,8 @@ type BehaviorConfig struct {
 	PageSize         int
 	CacheTTL         string
 	CacheTTLDuration time.Duration
+	MyPRsQuery       string // search/issues query for the "my PRs" screen -- issue #11
+	DiffContextLines int    // unchanged context lines shown per side of a PR diff hunk; 0 = no trimming
 }
 
 // KeyConfig is the [keys] table: every binding, remappable.
@@ -70,6 +72,7 @@ type KeyConfig struct {
 	Edit    string
 	Web     string
 	Refresh string
+	MyPRs   string
 }
 
 // Defaults returns the compiled default configuration, matching the TOML
@@ -97,6 +100,8 @@ func Defaults() Config {
 			PageSize:         30,
 			CacheTTL:         "5m",
 			CacheTTLDuration: 5 * time.Minute,
+			MyPRsQuery:       "is:pr is:open involves:@me",
+			DiffContextLines: 3,
 		},
 		Keys: KeyConfig{
 			Quit:    "q",
@@ -113,6 +118,7 @@ func Defaults() Config {
 			Edit:    "e",
 			Web:     "o",
 			Refresh: "r",
+			MyPRs:   "p",
 		},
 	}
 }

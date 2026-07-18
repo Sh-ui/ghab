@@ -74,7 +74,34 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				h.recordVisit(r.owner + "/" + r.repo)
 			}
 		}
-		return a, msg.screen.Init()
+		// bubbletea delivers tea.WindowSizeMsg exactly once at program
+		// start (plus on a real terminal resize) -- it does NOT replay on
+		// every push. Without this, any screen pushed after that first
+		// message has already landed (i.e. essentially every interactive
+		// push: typing into Home, a search/profile hop, entering a PR)
+		// never learns the terminal's real size, so its own width/height
+		// fields stay at the Go zero value forever and every sub-pane it
+		// lays out renders degenerate (0-width boxes, 0-row lists) even
+		// though the outer frame still looks fine (View's width/height
+		// parameters come from the App, not the screen). Replaying the
+		// last known size into the freshly pushed screen here, before its
+		// own Init() cmds run, is what makes that first real render
+		// correct instead of only the CLI `ghab owner/repo` jump-arg path
+		// (which starts the stack already containing the target screen,
+		// so it alone was ever present when the one real message arrived).
+		top := a.stack[len(a.stack)-1]
+		if a.width > 0 {
+			// Replay the RAW terminal size (matching what the real,
+			// once-only tea.WindowSizeMsg carries) -- not a.height-1;
+			// that adjustment is View's own footer-line reservation, done
+			// again every render, and every screen's resize math already
+			// assumes it's working from the raw height.
+			var cmd tea.Cmd
+			top, cmd = top.Update(tea.WindowSizeMsg{Width: a.width, Height: a.height})
+			a.stack[len(a.stack)-1] = top
+			return a, tea.Batch(cmd, top.Init())
+		}
+		return a, top.Init()
 	case popScreenMsg:
 		if len(a.stack) > 1 {
 			a.stack = a.stack[:len(a.stack)-1]

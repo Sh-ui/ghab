@@ -157,3 +157,13 @@ func (c *Client) IssueDetail(owner, repo string, number int) (IssueDetail, error
 
 	return IssueDetail{Issue: issue, Comments: comments}, nil
 }
+
+// RefreshIssueDetail busts the cache entries for one issue/PR's detail
+// (the issue GET plus its comments list), forcing the next IssueDetail
+// call to hit the network. Distinct from RefreshIssues, which busts the
+// list fetch feeding the issues/prs tabs -- used by the "r" refresh
+// binding when a PR's own detail/conversation view is open.
+func (c *Client) RefreshIssueDetail(owner, repo string, number int) {
+	c.cache.bust(fmt.Sprintf("repos/%s/%s/issues/%d", owner, repo, number))
+	c.cache.bust(fmt.Sprintf("repos/%s/%s/issues/%d/comments", owner, repo, number))
+}

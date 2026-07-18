@@ -80,6 +80,10 @@ func (h *HomeScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			return h, nil
 		case matchesKey(msg, h.cfg.Keys.Quit) && h.input.Value() == "":
 			return h, tea.Quit
+		case matchesKey(msg, h.cfg.Keys.MyPRs) && h.input.Value() == "":
+			// Only fires on an empty input so typing a literal "p" into
+			// an owner/repo or search query still works as text entry.
+			return h, pushScreen(NewMyPRsScreen(h.cfg, h.theme, h.client, h.readmeStylePath))
 		}
 	}
 
@@ -125,7 +129,10 @@ func (h *HomeScreen) Footer() []style.KeyHint {
 		{Keys: h.cfg.Keys.Open, Label: "go"},
 	}
 	if h.input.Value() == "" {
-		hints = append(hints, style.KeyHint{Keys: h.cfg.Keys.Quit, Label: "quit"})
+		hints = append(hints,
+			style.KeyHint{Keys: h.cfg.Keys.MyPRs, Label: "my PRs"},
+			style.KeyHint{Keys: h.cfg.Keys.Quit, Label: "quit"},
+		)
 	} else {
 		hints = append(hints, style.KeyHint{Keys: h.cfg.Keys.Back, Label: "clear"})
 	}

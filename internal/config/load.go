@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -141,6 +142,29 @@ func mergeBehavior(b *BehaviorConfig, sec map[string]interface{}, warn func(key,
 		b.CacheTTL = rawTTL
 		b.CacheTTLDuration = d
 	}
+
+	// my_prs_query drives the search/issues query the "my PRs" screen
+	// fires (issue #11); an empty query would search every open PR on
+	// GitHub, so -- unlike clone_dir/editor/open_url, where an empty
+	// string is at least a plausible (if odd) value -- this one is
+	// rejected like a keybinding: keep the default and warn.
+	beforeQuery := b.MyPRsQuery
+	mergeString(sec, "my_prs_query", &b.MyPRsQuery, prefixed)
+	if strings.TrimSpace(b.MyPRsQuery) == "" {
+		b.MyPRsQuery = beforeQuery
+		prefixed("my_prs_query", "empty query not allowed; keeping default")
+	}
+
+	if sec != nil {
+		if v, ok := sec["diff_context_lines"]; ok {
+			n, ok := toInt(v)
+			if !ok || n < 0 {
+				warn("behavior.diff_context_lines", fmt.Sprintf("expected non-negative integer, got %v; keeping default %d", v, b.DiffContextLines))
+			} else {
+				b.DiffContextLines = n
+			}
+		}
+	}
 }
 
 func toInt(v interface{}) (int, bool) {
@@ -166,7 +190,7 @@ func mergeKeys(k *KeyConfig, sec map[string]interface{}, warn func(key, msg stri
 		{"quit", &k.Quit}, {"help", &k.Help}, {"search", &k.Search}, {"back", &k.Back},
 		{"tab_next", &k.TabNext}, {"tab_prev", &k.TabPrev}, {"down", &k.Down}, {"up", &k.Up},
 		{"open", &k.Open}, {"profile", &k.Profile}, {"clone", &k.Clone}, {"edit", &k.Edit},
-		{"web", &k.Web}, {"refresh", &k.Refresh},
+		{"web", &k.Web}, {"refresh", &k.Refresh}, {"my_prs", &k.MyPRs},
 	}
 	for _, f := range fields {
 		before := *f.dst

@@ -76,6 +76,14 @@ type issuesTab struct {
 	detailVp        viewport.Model
 	renderedContent string
 	renderedWidth   int
+
+	// prDetail is only built when kind == issueKindPR: it replaces the
+	// plain body+comments detailVp above with the fuller PR detail
+	// (conversation + files-changed + diff + review threads) -- see
+	// prdetail.go's struct comment. Real issues have no files/diff, so
+	// issueKindIssue rows never touch this and keep the detailVp path
+	// above unchanged.
+	prDetail *prDetailModel
 }
 
 func newIssuesTab(cfg config.Config, theme style.Theme, client *gh.Client, styleOpt readmeStyleOption, owner, repo string, kind issueKind) *issuesTab {
@@ -134,12 +142,25 @@ func (t *issuesTab) Update(msg tea.Msg) tea.Cmd {
 		t.applyDetailContent()
 		return nil
 
-	case spinner.TickMsg:
-		if !t.loading && !t.detailLoading {
-			return nil
+	case prConvMsg, prFilesMsg, prThreadsMsg:
+		// prDetail's own fetch results -- only relevant when this tab's
+		// PR detail is open; RepoScreen forwards every non-key message to
+		// both the issues and prs tab regardless of which is active (see
+		// RepoScreen.Update's fallthrough), so a real-issue row's
+		// issuesTab sees these too and must no-op on them.
+		if t.kind == issueKindPR && t.prDetail != nil {
+			return t.prDetail.Update(msg)
 		}
+		return nil
+
+	case spinner.TickMsg:
 		var cmd tea.Cmd
-		t.spinner, cmd = t.spinner.Update(msg)
+		if t.loading || t.detailLoading {
+			t.spinner, cmd = t.spinner.Update(msg)
+		}
+		if t.kind == issueKindPR && t.prDetail != nil {
+			return tea.Batch(cmd, t.prDetail.Update(msg))
+		}
 		return cmd
 
 	case tea.KeyMsg:
@@ -168,9 +189,19 @@ func (t *issuesTab) handleListKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 // handleDetailKey: back pops detail -> list (never bubbles to RepoScreen
-// from here -- see the struct comment). j/k scroll the body+comments
-// viewport via its default keymap.
+// from here -- see the struct comment). For a PR row, key handling
+// (including its own back-pops-diff-to-files level) is delegated whole to
+// prDetail; for a real issue, j/k scroll the body+comments viewport via
+// its default keymap same as before.
 func (t *issuesTab) handleDetailKey(msg tea.KeyMsg) tea.Cmd {
+	if t.kind == issueKindPR && t.prDetail != nil {
+		cmd, exit := t.prDetail.handleKey(msg)
+		if exit {
+			t.exitDetail()
+		}
+		return cmd
+	}
+
 	if matchesKey(msg, t.cfg.Keys.Back) {
 		t.exitDetail()
 		return nil
@@ -218,6 +249,13 @@ func (t *issuesTab) enterDetail() tea.Cmd {
 	}
 	issue := t.list[t.cursor]
 	t.selected = &issue
+
+	if t.kind == issueKindPR {
+		t.prDetail = newPRDetailModel(t.cfg, t.theme, t.client, t.styleOpt, t.owner, t.repo, issue.Number)
+		t.prDetail.resize(t.width, t.rows)
+		return t.prDetail.start()
+	}
+
 	t.detailLoading = true
 	t.detailErr = nil
 	t.detail = gh.IssueDetail{}
@@ -235,6 +273,27 @@ func (t *issuesTab) exitDetail() {
 	t.selected = nil
 }
 
+// wantsHorizontalKeys reports whether this tab is currently showing a PR
+// diff sub-view, which claims h/l for horizontal scroll via bubbles
+// viewport's own keymap -- RepoScreen must not intercept h/l for
+// tab-switching while this is true. See RepoScreen.activeWantsHorizontalKeys.
+func (t *issuesTab) wantsHorizontalKeys() bool {
+	return t.kind == issueKindPR && t.selected != nil && t.prDetail != nil && t.prDetail.atDiff()
+}
+
+// refreshDetail refreshes the currently-open PR detail (files, review
+// threads, conversation) instead of the issues/prs list -- called by
+// RepoScreen's "r" handler when a PR's own detail view is open, so
+// refresh acts on whatever's on screen rather than always re-fetching the
+// list underneath it. Returns nil when there's no PR detail open (list
+// level, or the issues-kind tab, which has no such distinction).
+func (t *issuesTab) refreshDetail() tea.Cmd {
+	if t.kind == issueKindPR && t.selected != nil && t.prDetail != nil {
+		return t.prDetail.refresh()
+	}
+	return nil
+}
+
 // resize sets the tab's pane geometry from the shared tab-body area
 // (width x rows -- the same area every repo tab renders into).
 func (t *issuesTab) resize(width, rows int) {
@@ -249,6 +308,9 @@ func (t *issuesTab) resize(width, rows int) {
 	t.detailVp.Height = rows
 	if t.selected != nil {
 		t.applyDetailContent()
+	}
+	if t.prDetail != nil {
+		t.prDetail.resize(width, rows)
 	}
 }
 
@@ -322,6 +384,9 @@ func (t *issuesTab) View() string {
 		return t.theme.ErrorText.Render("error: " + t.err.Error())
 	}
 	if t.selected != nil {
+		if t.kind == issueKindPR && t.prDetail != nil {
+			return t.prDetail.View()
+		}
 		return t.detailVp.View()
 	}
 	if len(t.list) == 0 {
@@ -381,6 +446,9 @@ func (t *issuesTab) renderListRow(issue gh.Issue, selected bool) string {
 // RepoScreen.Footer, per BUILD.md's M3 footer spec.
 func (t *issuesTab) footerHints(cfg config.Config) []style.KeyHint {
 	if t.atDetail() {
+		if t.kind == issueKindPR && t.prDetail != nil {
+			return t.prDetail.footerHints(cfg)
+		}
 		return []style.KeyHint{{Keys: cfg.Keys.Down + "/" + cfg.Keys.Up, Label: "scroll"}}
 	}
 	return []style.KeyHint{

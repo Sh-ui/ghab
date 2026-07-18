@@ -47,17 +47,19 @@ func printCheckConfig(path string, cfg config.Config, palette config.PaletteResu
 	}
 
 	fmt.Println("  [behavior]")
-	fmt.Printf("    clone_dir = %s\n", cfg.Behavior.CloneDir)
-	fmt.Printf("    editor    = %s\n", cfg.Behavior.Editor)
-	fmt.Printf("    open_url  = %s\n", cfg.Behavior.OpenURL)
-	fmt.Printf("    page_size = %d\n", cfg.Behavior.PageSize)
-	fmt.Printf("    cache_ttl = %s\n\n", cfg.Behavior.CacheTTL)
+	fmt.Printf("    clone_dir          = %s\n", cfg.Behavior.CloneDir)
+	fmt.Printf("    editor             = %s\n", cfg.Behavior.Editor)
+	fmt.Printf("    open_url           = %s\n", cfg.Behavior.OpenURL)
+	fmt.Printf("    page_size          = %d\n", cfg.Behavior.PageSize)
+	fmt.Printf("    cache_ttl          = %s\n", cfg.Behavior.CacheTTL)
+	fmt.Printf("    my_prs_query       = %s\n", cfg.Behavior.MyPRsQuery)
+	fmt.Printf("    diff_context_lines = %d\n\n", cfg.Behavior.DiffContextLines)
 
 	fmt.Println("  [keys]")
 	fmt.Printf("    quit=%s help=%s search=%s back=%s\n", cfg.Keys.Quit, cfg.Keys.Help, cfg.Keys.Search, cfg.Keys.Back)
 	fmt.Printf("    tab_next=%s tab_prev=%s down=%s up=%s\n", cfg.Keys.TabNext, cfg.Keys.TabPrev, cfg.Keys.Down, cfg.Keys.Up)
-	fmt.Printf("    open=%s profile=%s clone=%s edit=%s web=%s refresh=%s\n\n",
-		cfg.Keys.Open, cfg.Keys.Profile, cfg.Keys.Clone, cfg.Keys.Edit, cfg.Keys.Web, cfg.Keys.Refresh)
+	fmt.Printf("    open=%s profile=%s clone=%s edit=%s web=%s refresh=%s my_prs=%s\n\n",
+		cfg.Keys.Open, cfg.Keys.Profile, cfg.Keys.Clone, cfg.Keys.Edit, cfg.Keys.Web, cfg.Keys.Refresh, cfg.Keys.MyPRs)
 
 	all := append(append(append(append([]config.Warning{}, warnings...), paletteWarnings...), themeWarnings...), readmeStyleWarnings...)
 	if len(all) == 0 {
