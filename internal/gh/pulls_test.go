@@ -12,7 +12,7 @@ func TestPullFileClassification(t *testing.T) {
 		wantOmission  PatchOmission
 		wantBinary    bool
 		wantTooLarge  bool
-		wantPureRenam bool
+		wantPureRename bool
 	}{
 		{
 			name:         "normal modified file with a patch",
@@ -29,7 +29,7 @@ func TestPullFileClassification(t *testing.T) {
 			name:          "pure rename (no content change)",
 			file:          PullFile{Status: "renamed", Patch: "", Additions: 0, Deletions: 0},
 			wantOmission:  PatchOmittedRename,
-			wantPureRenam: true,
+			wantPureRename: true,
 		},
 		{
 			name:         "rename with content change carries a patch",
@@ -66,10 +66,16 @@ func TestPullFileClassification(t *testing.T) {
 			wantTooLarge: true,
 		},
 		{
-			name:          "renamed binary file: rename wins, still not too-large",
+			// A patchless rename classifies as PatchOmittedRename ahead of
+			// the binary and too-large arms -- rename wins the ordering.
+			// Note this is the only shape a renamed binary can arrive in
+			// too: GitHub sends it patchless with zero line counts, so a
+			// renamed binary WITH a content change is indistinguishable
+			// here and renders "(renamed, no changes)".
+			name:          "patchless rename classifies as PatchOmittedRename ahead of binary/too-large",
 			file:          PullFile{Status: "renamed", Patch: "", Additions: 0, Deletions: 0},
 			wantOmission:  PatchOmittedRename,
-			wantPureRenam: true,
+			wantPureRename: true,
 		},
 	}
 
@@ -84,8 +90,8 @@ func TestPullFileClassification(t *testing.T) {
 			if got := tc.file.IsDiffTooLarge(); got != tc.wantTooLarge {
 				t.Errorf("IsDiffTooLarge() = %v, want %v", got, tc.wantTooLarge)
 			}
-			if got := tc.file.IsPureRename(); got != tc.wantPureRenam {
-				t.Errorf("IsPureRename() = %v, want %v", got, tc.wantPureRenam)
+			if got := tc.file.IsPureRename(); got != tc.wantPureRename {
+				t.Errorf("IsPureRename() = %v, want %v", got, tc.wantPureRename)
 			}
 		})
 	}

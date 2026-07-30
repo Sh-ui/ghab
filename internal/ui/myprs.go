@@ -186,17 +186,41 @@ func (s *MyPRsScreen) View(width, height int) string {
 	}
 
 	var b strings.Builder
+	// Both the header and the empty-state line carry queryLabel(), which
+	// runs ~78 columns for the default two queries -- past a narrow
+	// terminal it wraps, and a wrapped header eats a row the list budget
+	// already spent. Truncate to the same width renderRow clamps rows to.
+	const headerPrefix = "my PRs  "
 	header := s.theme.AccentAltText.Render("my PRs") + "  " +
-		s.theme.MutedText.Render(fmt.Sprintf("%d open (%s)", s.total, s.queryLabel()))
+		s.theme.MutedText.Render(s.clampLine(
+			fmt.Sprintf("%d open (%s)", s.total, s.queryLabel()),
+			width, len([]rune(headerPrefix))))
 	b.WriteString(header)
 	b.WriteString("\n\n")
 
 	if len(s.items) == 0 {
-		b.WriteString(s.theme.MutedText.Render("no open PRs match " + s.queryLabel()))
+		b.WriteString(s.theme.MutedText.Render(
+			s.clampLine("no open PRs match "+s.queryLabel(), width, 0)))
 		return b.String()
 	}
 	b.WriteString(strings.Join(s.listBodyLines(), "\n"))
 	return b.String()
+}
+
+// clampLine truncates a chrome line to the terminal width, minus the
+// width of whatever already-styled prefix sits in front of it. Width
+// comes from the last WindowSizeMsg the way renderRow takes it, falling
+// back to the width View was handed; with neither known there is nothing
+// to clamp to and the line passes through.
+func (s *MyPRsScreen) clampLine(text string, viewWidth, prefix int) string {
+	width := s.width
+	if width < 1 {
+		width = viewWidth
+	}
+	if width < 1 {
+		return text
+	}
+	return truncateTo(text, width-prefix)
 }
 
 // queryLabel renders the configured query set for the header/empty-state

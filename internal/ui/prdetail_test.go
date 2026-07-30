@@ -63,11 +63,9 @@ func TestRefreshBustsOpenDiff(t *testing.T) {
 		t.Fatalf("setup: diff viewport does not show the original patch:\n%s", p.diffVp.View())
 	}
 
-	// What "r" does locally, minus the network: mark the fetches in
-	// flight and invalidate the render.
-	p.convLoading, p.filesLoading, p.threadsLoading = true, true, true
-	p.invalidateDiffRender()
-	p.applyDiffContent()
+	// What "r" does locally, minus the network -- the same method
+	// refresh() calls, so dropping the invalidation from it fails here.
+	p.markRefreshing()
 
 	if got := p.diffVp.View(); strings.Contains(got, "PRE_REFRESH_CONTENT") {
 		t.Errorf("in-flight refresh still shows pre-refresh content:\n%s", got)

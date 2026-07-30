@@ -181,6 +181,15 @@ func (p *prDetailModel) refresh() tea.Cmd {
 	p.client.RefreshIssueDetail(p.owner, p.repo, p.number)
 	p.client.RefreshPullFiles(p.owner, p.repo, p.number, p.perPage)
 	p.client.RefreshPullReviewComments(p.owner, p.repo, p.number)
+	p.markRefreshing()
+	return p.start()
+}
+
+// markRefreshing is the local half of a refresh -- everything "r" does to
+// this model's own state once the cache entries are busted, with no
+// network in it. Split out of refresh() so a test can drive the exact
+// transition the key press produces rather than a hand-rolled copy of it.
+func (p *prDetailModel) markRefreshing() {
 	p.convLoading, p.filesLoading, p.threadsLoading = true, true, true
 	p.convErr, p.filesErr, p.threadsErr = nil, nil, nil
 	// Bust the rendered diff as well as the caches behind it. The render
@@ -190,7 +199,6 @@ func (p *prDetailModel) refresh() tea.Cmd {
 	// the diff on screen never moves.
 	p.invalidateDiffRender()
 	p.applyDiffContent()
-	return p.start()
 }
 
 // invalidateDiffRender drops the cached diff render so the next
