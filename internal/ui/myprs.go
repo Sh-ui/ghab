@@ -31,7 +31,7 @@ type MyPRsScreen struct {
 	client *gh.Client
 
 	readmeStylePath string
-	query           string
+	queries         []string
 	perPage         int
 
 	loading bool
@@ -48,9 +48,10 @@ type MyPRsScreen struct {
 	height int
 }
 
-// NewMyPRsScreen builds the my-PRs screen. query is
-// [behavior].my_prs_query (config-first: Ian tunes the involves/author
-// filter without a rebuild).
+// NewMyPRsScreen builds the my-PRs screen. queries is
+// [behavior].my_prs_query (config-first: Ian narrows or widens the scope
+// without a rebuild) -- several queries because GitHub search has no OR
+// between qualifiers, merged and de-duplicated by gh.MyPRs.
 func NewMyPRsScreen(cfg config.Config, theme style.Theme, client *gh.Client, readmeStylePath string) *MyPRsScreen {
 	sp := spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(theme.Spinner))
 	return &MyPRsScreen{
@@ -58,7 +59,7 @@ func NewMyPRsScreen(cfg config.Config, theme style.Theme, client *gh.Client, rea
 		theme:           theme,
 		client:          client,
 		readmeStylePath: readmeStylePath,
-		query:           cfg.Behavior.MyPRsQuery,
+		queries:         cfg.Behavior.MyPRsQueries,
 		perPage:         cfg.Behavior.PageSize,
 		loading:         true,
 		spinner:         sp,
@@ -66,9 +67,9 @@ func NewMyPRsScreen(cfg config.Config, theme style.Theme, client *gh.Client, rea
 }
 
 func (s *MyPRsScreen) fetchCmd() tea.Cmd {
-	query, perPage, client := s.query, s.perPage, s.client
+	queries, perPage, client := s.queries, s.perPage, s.client
 	return func() tea.Msg {
-		total, items, err := client.MyPRs(query, perPage)
+		total, items, err := client.MyPRs(queries, perPage)
 		return myPRsResultMsg{total: total, items: items, err: err}
 	}
 }
@@ -127,7 +128,7 @@ func (s *MyPRsScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			}
 			return s, nil
 		case matchesKey(msg, s.cfg.Keys.Refresh):
-			s.client.RefreshMyPRs(s.query, s.perPage)
+			s.client.RefreshMyPRs(s.queries, s.perPage)
 			s.loading = true
 			s.err = nil
 			return s, tea.Batch(s.spinner.Tick, s.fetchCmd())
@@ -186,16 +187,23 @@ func (s *MyPRsScreen) View(width, height int) string {
 
 	var b strings.Builder
 	header := s.theme.AccentAltText.Render("my PRs") + "  " +
-		s.theme.MutedText.Render(fmt.Sprintf("%d open (%s)", s.total, s.query))
+		s.theme.MutedText.Render(fmt.Sprintf("%d open (%s)", s.total, s.queryLabel()))
 	b.WriteString(header)
 	b.WriteString("\n\n")
 
 	if len(s.items) == 0 {
-		b.WriteString(s.theme.MutedText.Render("no open PRs match " + s.query))
+		b.WriteString(s.theme.MutedText.Render("no open PRs match " + s.queryLabel()))
 		return b.String()
 	}
 	b.WriteString(strings.Join(s.listBodyLines(), "\n"))
 	return b.String()
+}
+
+// queryLabel renders the configured query set for the header/empty-state
+// line: one query prints as itself, several join with " | " so the scope
+// on screen is the scope actually fetched.
+func (s *MyPRsScreen) queryLabel() string {
+	return strings.Join(s.queries, " | ")
 }
 
 func (s *MyPRsScreen) listBodyLines() []string {

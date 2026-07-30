@@ -92,6 +92,49 @@ func mergeString(sec map[string]interface{}, key string, dst *string, warn func(
 	*dst = s
 }
 
+// mergeQueries merges a key whose value may be a single string (one
+// query) or an array of strings (several, merged client-side) into dst,
+// dropping blank entries. Anything else -- a non-string, a mixed array,
+// or a value with no usable entry left -- keeps the compiled default and
+// warns, the same fail-soft contract as every other key.
+func mergeQueries(sec map[string]interface{}, key string, dst *[]string, warn func(key, msg string)) {
+	if sec == nil {
+		return
+	}
+	v, ok := sec[key]
+	if !ok {
+		return
+	}
+	var raw []string
+	switch tv := v.(type) {
+	case string:
+		raw = []string{tv}
+	case []interface{}:
+		for _, e := range tv {
+			s, ok := e.(string)
+			if !ok {
+				warn(key, fmt.Sprintf("expected string entries, got %T; keeping default %v", e, *dst))
+				return
+			}
+			raw = append(raw, s)
+		}
+	default:
+		warn(key, fmt.Sprintf("expected string or array of strings, got %T; keeping default %v", v, *dst))
+		return
+	}
+	out := make([]string, 0, len(raw))
+	for _, s := range raw {
+		if strings.TrimSpace(s) != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		warn(key, "empty query not allowed; keeping default")
+		return
+	}
+	*dst = out
+}
+
 func mergePalette(p *PaletteSetting, sec map[string]interface{}, warn func(key, msg string)) {
 	mergeString(sec, "file", &p.File, func(key, msg string) { warn("palette."+key, msg) })
 	if p.File == "" {
@@ -143,17 +186,15 @@ func mergeBehavior(b *BehaviorConfig, sec map[string]interface{}, warn func(key,
 		b.CacheTTLDuration = d
 	}
 
-	// my_prs_query drives the search/issues query the "my PRs" screen
-	// fires (issue #11); an empty query would search every open PR on
+	// my_prs_query drives the search/issues queries the "my PRs" screen
+	// fires (issue #11). It takes a single string or an array of strings,
+	// because GitHub's search has no OR between qualifiers: the documented
+	// authored-or-review-requested scope needs one query per qualifier,
+	// merged client-side. An empty query would search every open PR on
 	// GitHub, so -- unlike clone_dir/editor/open_url, where an empty
-	// string is at least a plausible (if odd) value -- this one is
+	// string is at least a plausible (if odd) value -- empties are
 	// rejected like a keybinding: keep the default and warn.
-	beforeQuery := b.MyPRsQuery
-	mergeString(sec, "my_prs_query", &b.MyPRsQuery, prefixed)
-	if strings.TrimSpace(b.MyPRsQuery) == "" {
-		b.MyPRsQuery = beforeQuery
-		prefixed("my_prs_query", "empty query not allowed; keeping default")
-	}
+	mergeQueries(sec, "my_prs_query", &b.MyPRsQueries, prefixed)
 
 	if sec != nil {
 		if v, ok := sec["diff_context_lines"]; ok {

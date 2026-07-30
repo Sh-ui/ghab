@@ -52,7 +52,16 @@ func printCheckConfig(path string, cfg config.Config, palette config.PaletteResu
 	fmt.Printf("    open_url           = %s\n", cfg.Behavior.OpenURL)
 	fmt.Printf("    page_size          = %d\n", cfg.Behavior.PageSize)
 	fmt.Printf("    cache_ttl          = %s\n", cfg.Behavior.CacheTTL)
-	fmt.Printf("    my_prs_query       = %s\n", cfg.Behavior.MyPRsQuery)
+	// Printed one-per-line: the resolved value is a query SET (GitHub
+	// search has no OR between qualifiers), and joining them onto one
+	// line would read like a single query that nothing matches.
+	for i, q := range cfg.Behavior.MyPRsQueries {
+		if i == 0 {
+			fmt.Printf("    %-18s = %s\n", "my_prs_query", q)
+			continue
+		}
+		fmt.Printf("    %-18s   %s\n", "", q)
+	}
 	fmt.Printf("    diff_context_lines = %d\n\n", cfg.Behavior.DiffContextLines)
 
 	fmt.Println("  [keys]")

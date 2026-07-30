@@ -11,8 +11,8 @@ import (
 // files-changed list with +/- counts, plus GitHub's own per-file unified
 // diff ("patch"). GitHub omits Patch for binary files, for files over its
 // size threshold, and for pure renames with no content change -- see
-// IsBinary/IsPureRename, which the diff view uses to render a placeholder
-// instead of an empty pane.
+// Omission, which the diff view uses to render the placeholder matching
+// the actual reason instead of an empty pane.
 type PullFile struct {
 	Filename         string `json:"filename"`
 	PreviousFilename string `json:"previous_filename"`
@@ -33,9 +33,51 @@ func (f PullFile) IsPureRename() bool {
 	return f.Patch == "" && f.Status == "renamed" && f.Additions == 0 && f.Deletions == 0
 }
 
-// IsBinary reports whether GitHub omitted a patch for a reason other than
-// a pure rename -- the diff view's binary-file placeholder case.
-func (f PullFile) IsBinary() bool { return f.Patch == "" && !f.IsPureRename() }
+// PatchOmission says WHY a PullFile carries no unified diff. The files
+// endpoint has no "binary" flag -- it simply omits "patch", and it does
+// that for several unrelated reasons, so "no patch" alone cannot mean
+// binary. Distinguishing them is what keeps an oversized text diff from
+// being labeled a binary file.
+type PatchOmission int
+
+const (
+	// PatchPresent -- GitHub sent a patch; there is a diff to render.
+	PatchPresent PatchOmission = iota
+	// PatchOmittedRename -- a pure rename with no content change.
+	PatchOmittedRename
+	// PatchOmittedBinary -- no patch AND no line counts, so the file has
+	// no text lines to diff at all: binary content.
+	PatchOmittedBinary
+	// PatchOmittedTooLarge -- the line counts say text changed, so a diff
+	// exists; GitHub just declined to send it (its per-file diff size and
+	// line caps).
+	PatchOmittedTooLarge
+)
+
+// Omission classifies this entry per PatchOmission. The line counts carry
+// the signal: GitHub reports 0/0/0 for a file it can't diff textually,
+// and real +/- counts for a text diff it merely withheld.
+func (f PullFile) Omission() PatchOmission {
+	if f.Patch != "" {
+		return PatchPresent
+	}
+	if f.IsPureRename() {
+		return PatchOmittedRename
+	}
+	if f.Additions > 0 || f.Deletions > 0 || f.Changes > 0 {
+		return PatchOmittedTooLarge
+	}
+	return PatchOmittedBinary
+}
+
+// IsBinary reports content GitHub cannot express as a text diff -- the
+// diff view's binary-file placeholder case.
+func (f PullFile) IsBinary() bool { return f.Omission() == PatchOmittedBinary }
+
+// IsDiffTooLarge reports a text diff GitHub withheld rather than one that
+// does not exist -- the diff view labels this "diff not loaded", not
+// "binary".
+func (f PullFile) IsDiffTooLarge() bool { return f.Omission() == PatchOmittedTooLarge }
 
 // pullFilesPath builds the files-changed endpoint URL -- factored out so
 // RefreshPullFiles busts the exact cache key PullFiles fetches under.

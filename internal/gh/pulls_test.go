@@ -7,44 +7,85 @@ import (
 
 func TestPullFileClassification(t *testing.T) {
 	cases := []struct {
-		name           string
-		file           PullFile
-		wantBinary     bool
-		wantPureRename bool
+		name          string
+		file          PullFile
+		wantOmission  PatchOmission
+		wantBinary    bool
+		wantTooLarge  bool
+		wantPureRenam bool
 	}{
 		{
-			name:           "normal modified file with a patch",
-			file:           PullFile{Status: "modified", Patch: "@@ -1 +1 @@\n-a\n+b", Additions: 1, Deletions: 1},
-			wantBinary:     false,
-			wantPureRename: false,
+			name:         "normal modified file with a patch",
+			file:         PullFile{Status: "modified", Patch: "@@ -1 +1 @@\n-a\n+b", Additions: 1, Deletions: 1, Changes: 2},
+			wantOmission: PatchPresent,
 		},
 		{
-			name:           "binary file (no patch, not a rename)",
-			file:           PullFile{Status: "modified", Patch: ""},
-			wantBinary:     true,
-			wantPureRename: false,
+			name:         "binary file: no patch, no line counts",
+			file:         PullFile{Status: "modified", Patch: "", Additions: 0, Deletions: 0, Changes: 0},
+			wantOmission: PatchOmittedBinary,
+			wantBinary:   true,
 		},
 		{
-			name:           "pure rename (no content change)",
-			file:           PullFile{Status: "renamed", Patch: "", Additions: 0, Deletions: 0},
-			wantBinary:     false,
-			wantPureRename: true,
+			name:          "pure rename (no content change)",
+			file:          PullFile{Status: "renamed", Patch: "", Additions: 0, Deletions: 0},
+			wantOmission:  PatchOmittedRename,
+			wantPureRenam: true,
 		},
 		{
-			name:           "rename with content change carries a patch",
-			file:           PullFile{Status: "renamed", Patch: "@@ -1 +1 @@\n-a\n+b", Additions: 1, Deletions: 1},
-			wantBinary:     false,
-			wantPureRename: false,
+			name:         "rename with content change carries a patch",
+			file:         PullFile{Status: "renamed", Patch: "@@ -1 +1 @@\n-a\n+b", Additions: 1, Deletions: 1, Changes: 2},
+			wantOmission: PatchPresent,
+		},
+		{
+			// The finding this classification exists for: a text file
+			// whose diff GitHub withheld for size still reports real
+			// line counts, so it is NOT binary.
+			name:         "oversized text diff: no patch but real line counts",
+			file:         PullFile{Status: "modified", Patch: "", Additions: 4000, Deletions: 3200, Changes: 7200},
+			wantOmission: PatchOmittedTooLarge,
+			wantTooLarge: true,
+		},
+		{
+			name:         "oversized added file: additions only",
+			file:         PullFile{Status: "added", Patch: "", Additions: 9000, Deletions: 0, Changes: 9000},
+			wantOmission: PatchOmittedTooLarge,
+			wantTooLarge: true,
+		},
+		{
+			name:         "oversized removed file: deletions only",
+			file:         PullFile{Status: "removed", Patch: "", Additions: 0, Deletions: 9000, Changes: 9000},
+			wantOmission: PatchOmittedTooLarge,
+			wantTooLarge: true,
+		},
+		{
+			// Changes alone (no additions/deletions breakdown) is still
+			// evidence of text having changed.
+			name:         "no patch, changes count only",
+			file:         PullFile{Status: "modified", Patch: "", Changes: 12},
+			wantOmission: PatchOmittedTooLarge,
+			wantTooLarge: true,
+		},
+		{
+			name:          "renamed binary file: rename wins, still not too-large",
+			file:          PullFile{Status: "renamed", Patch: "", Additions: 0, Deletions: 0},
+			wantOmission:  PatchOmittedRename,
+			wantPureRenam: true,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.file.Omission(); got != tc.wantOmission {
+				t.Errorf("Omission() = %v, want %v", got, tc.wantOmission)
+			}
 			if got := tc.file.IsBinary(); got != tc.wantBinary {
 				t.Errorf("IsBinary() = %v, want %v", got, tc.wantBinary)
 			}
-			if got := tc.file.IsPureRename(); got != tc.wantPureRename {
-				t.Errorf("IsPureRename() = %v, want %v", got, tc.wantPureRename)
+			if got := tc.file.IsDiffTooLarge(); got != tc.wantTooLarge {
+				t.Errorf("IsDiffTooLarge() = %v, want %v", got, tc.wantTooLarge)
+			}
+			if got := tc.file.IsPureRename(); got != tc.wantPureRenam {
+				t.Errorf("IsPureRename() = %v, want %v", got, tc.wantPureRenam)
 			}
 		})
 	}

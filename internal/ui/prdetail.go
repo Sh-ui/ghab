@@ -183,7 +183,51 @@ func (p *prDetailModel) refresh() tea.Cmd {
 	p.client.RefreshPullReviewComments(p.owner, p.repo, p.number)
 	p.convLoading, p.filesLoading, p.threadsLoading = true, true, true
 	p.convErr, p.filesErr, p.threadsErr = nil, nil, nil
+	// Bust the rendered diff as well as the caches behind it. The render
+	// cache keys on (filename, width) and a refresh changes neither, so
+	// without this an open diff keeps replaying renderedDiffContent while
+	// the file list refetches underneath it -- the file list refreshes and
+	// the diff on screen never moves.
+	p.invalidateDiffRender()
+	p.applyDiffContent()
 	return p.start()
+}
+
+// invalidateDiffRender drops the cached diff render so the next
+// applyDiffContent rebuilds from live data instead of replaying the
+// previous one. Cheap: the rebuild is a string walk over an
+// already-fetched patch, no network.
+func (p *prDetailModel) invalidateDiffRender() {
+	p.renderedDiffFile = ""
+	p.renderedDiffWidth = -1
+	p.renderedDiffContent = ""
+}
+
+// rebindDiffFile re-points diffFile at the freshly fetched entry for the
+// same path and rebuilds the render, so a refresh with the diff view open
+// replaces the patch on screen rather than leaving the pre-refresh one
+// there. A file that vanished from the new list (force-push, dropped
+// commit) has no diff left to show, so the view steps back up to the
+// files list instead of holding a diff for a file the PR no longer
+// touches.
+func (p *prDetailModel) rebindDiffFile() {
+	if p.diffFile == nil {
+		return
+	}
+	name := p.diffFile.Filename
+	p.invalidateDiffRender()
+	for i := range p.files {
+		if p.files[i].Filename == name {
+			f := p.files[i]
+			p.diffFile = &f
+			p.applyDiffContent()
+			return
+		}
+	}
+	p.diffFile = nil
+	if p.view == prViewDiff {
+		p.view = prViewFiles
+	}
 }
 
 func (p *prDetailModel) atDiff() bool { return p.view == prViewDiff }
@@ -212,6 +256,7 @@ func (p *prDetailModel) Update(msg tea.Msg) tea.Cmd {
 		if msg.err == nil {
 			p.files = msg.files
 			p.clampFileCursor()
+			p.rebindDiffFile()
 		}
 		return nil
 
@@ -224,7 +269,7 @@ func (p *prDetailModel) Update(msg tea.Msg) tea.Cmd {
 		if msg.err == nil {
 			p.threadsByPath = groupThreadsByPath(msg.threads)
 			if p.view == prViewDiff {
-				p.renderedDiffFile = "" // force a rebuild now that threads landed
+				p.invalidateDiffRender() // force a rebuild now that threads landed
 				p.applyDiffContent()
 			}
 		}
@@ -441,7 +486,17 @@ func (p *prDetailModel) renderMarkdown(body string) string {
 // SetHorizontalStep -- see diffHorizontalStep), but the glamour-rendered
 // review-comment bodies interleaved with them do.
 func (p *prDetailModel) applyDiffContent() {
-	if p.diffFile == nil || p.diffVp.Width <= 0 {
+	if p.diffVp.Width <= 0 {
+		return
+	}
+	if p.filesLoading {
+		// A refetch is in flight, so whatever patch this model still holds
+		// is pre-refresh content by definition -- show the loading state
+		// rather than re-rendering it.
+		p.diffVp.SetContent(p.spinner.View() + " loading diff...")
+		return
+	}
+	if p.diffFile == nil {
 		return
 	}
 	if p.renderedDiffFile == p.diffFile.Filename && p.renderedDiffWidth == p.diffVp.Width {
@@ -455,19 +510,25 @@ func (p *prDetailModel) applyDiffContent() {
 	p.renderedDiffContent = content
 }
 
-// buildDiffContent renders one file's diff: a binary/pure-rename
-// placeholder, or the parsed+context-trimmed patch with add/remove/hunk
+// buildDiffContent renders one file's diff: the placeholder matching
+// GitHub's reason for omitting the patch (see gh.PullFile.Omission --
+// pure rename, binary, or a text diff withheld for size), or the
+// parsed+context-trimmed patch with add/remove/hunk
 // coloring, review threads inlined right after the diff line they anchor
 // to, and any thread that never matched a shown line (an outdated comment,
 // or one trimmed away by diff_context_lines) appended in a trailer rather
 // than silently dropped.
 func (p *prDetailModel) buildDiffContent() string {
 	f := p.diffFile
-	if f.IsPureRename() {
+	switch f.Omission() {
+	case gh.PatchOmittedRename:
 		return p.theme.MutedText.Render(fmt.Sprintf("renamed: %s -> %s (no content change)", f.PreviousFilename, f.Filename))
-	}
-	if f.IsBinary() {
+	case gh.PatchOmittedBinary:
 		return p.theme.MutedText.Render("binary file -- no diff shown")
+	case gh.PatchOmittedTooLarge:
+		return p.theme.MutedText.Render(fmt.Sprintf(
+			"diff not loaded -- GitHub omitted the patch for this file (too large): +%d -%d",
+			f.Additions, f.Deletions))
 	}
 
 	lines := gh.TrimContext(gh.ParsePatch(f.Patch), p.cfg.Behavior.DiffContextLines)
@@ -613,11 +674,13 @@ func (p *prDetailModel) renderFileRow(f gh.PullFile, selected bool) string {
 		name = f.PreviousFilename + " -> " + f.Filename
 	}
 	counts := fmt.Sprintf("+%d -%d", f.Additions, f.Deletions)
-	switch {
-	case f.IsPureRename():
+	switch f.Omission() {
+	case gh.PatchOmittedRename:
 		counts = "(renamed, no changes)"
-	case f.IsBinary():
+	case gh.PatchOmittedBinary:
 		counts = "(binary)"
+	case gh.PatchOmittedTooLarge:
+		counts += "  (diff not loaded)"
 	}
 	plain := fmt.Sprintf("%s %s  %s", marker, name, counts)
 
@@ -659,6 +722,12 @@ func (p *prDetailModel) diffView() string {
 	}
 	if p.diffFile == nil {
 		return p.theme.MutedText.Render("select a file")
+	}
+	if p.filesLoading {
+		// Mid-refresh: the file identity still holds, the diff body does
+		// not. Keep the header, replace the body with the spinner.
+		return p.theme.Body.Render(p.diffFile.Filename) + "\n\n" +
+			p.spinner.View() + " loading diff..."
 	}
 
 	header := p.theme.Body.Render(p.diffFile.Filename) + "  " +

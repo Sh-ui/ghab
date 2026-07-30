@@ -52,8 +52,14 @@ type BehaviorConfig struct {
 	PageSize         int
 	CacheTTL         string
 	CacheTTLDuration time.Duration
-	MyPRsQuery       string // search/issues query for the "my PRs" screen -- issue #11
-	DiffContextLines int    // unchanged context lines shown per side of a PR diff hunk; 0 = no trimming
+	// MyPRsQueries is the search/issues query set behind the "my PRs"
+	// screen (issue #11). GitHub's search syntax has no OR between
+	// qualifiers, so the documented authored-or-review-requested scope is
+	// two queries whose results merge and de-duplicate client-side. The
+	// `my_prs_query` config key accepts a single string (one query) or an
+	// array of strings.
+	MyPRsQueries     []string
+	DiffContextLines int // unchanged context lines shown per side of a PR diff hunk; 0 = no trimming
 }
 
 // KeyConfig is the [keys] table: every binding, remappable.
@@ -100,7 +106,10 @@ func Defaults() Config {
 			PageSize:         30,
 			CacheTTL:         "5m",
 			CacheTTLDuration: 5 * time.Minute,
-			MyPRsQuery:       "is:pr is:open involves:@me",
+			MyPRsQueries: []string{
+				"is:pr is:open author:@me",
+				"is:pr is:open review-requested:@me",
+			},
 			DiffContextLines: 3,
 		},
 		Keys: KeyConfig{

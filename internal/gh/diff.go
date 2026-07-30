@@ -42,8 +42,8 @@ const noNewlineMarker = `\ No newline at end of file`
 // -- GitHub's /pulls/{n}/files response omits the "--- a/f" / "+++ b/f"
 // file header lines other diff tools include, starting straight at the
 // first "@@" hunk header) into typed, line-numbered lines. Empty or
-// whitespace-only input (GitHub omits Patch for binary files and pure
-// renames -- see PullFile.IsBinary/IsPureRename) yields nil.
+// whitespace-only input (GitHub omits Patch for binary files, pure
+// renames, and oversized text diffs -- see PullFile.Omission) yields nil.
 func ParsePatch(patch string) []DiffLine {
 	if strings.TrimSpace(patch) == "" {
 		return nil
