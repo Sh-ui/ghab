@@ -2,6 +2,8 @@
 
 Browse GitHub like the website, in your terminal.
 
+![ghab opening charmbracelet/gum, tabbing through readme, code, and releases, then hopping to the owner profile](docs/demo.gif)
+
 ghab is a TUI that treats github.com's mental model -- a repo page with
 tabs, a profile page with repos, links you follow -- as something a
 terminal can do better. Point it at any repo and you get the familiar
