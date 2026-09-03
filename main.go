@@ -1,6 +1,6 @@
 // Command ghab is a terminal GitHub browser: readme / code / releases /
-// issues / prs for any repo, plus user profile hops. See BUILD.md for
-// the full spec; this file only does flag parsing and wiring.
+// issues / prs for any repo, plus user profile hops. See docs/BUILD.md
+// for the full spec; this file only does flag parsing and wiring.
 package main
 
 import (

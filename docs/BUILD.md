@@ -1,5 +1,10 @@
 # ghab -- GitHub browser TUI (BUILD spec)
 
+> Historical design record: this is the spec ghab was originally built
+> against, kept for the architecture and milestone reasoning. The
+> [README](../README.md) is the front door and documents current
+> behavior; where the two disagree, the README wins.
+
 **SOURCE OF TRUTH for the ghab build.** Supersedes nothing; genesis doc. Branch: `ghab/genesis`.
 
 ## What it is
