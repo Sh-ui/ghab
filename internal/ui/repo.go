@@ -351,8 +351,10 @@ func (r *RepoScreen) refreshActive() tea.Cmd {
 
 func (r *RepoScreen) resizeTabs() {
 	// Header takes 5 lines (top border + 3 body lines + bottom border),
-	// plus a blank line and the tab bar line before the tab body.
-	bodyHeight := r.height - 7
+	// plus a blank line, the tab bar line, and the notice line before the
+	// tab body -- and app.go reserves one more row for the footer. 5+1+1+1
+	// above the body plus 1 below = 9 rows of chrome.
+	bodyHeight := r.height - 9
 	if bodyHeight < 1 {
 		bodyHeight = 1
 	}
