@@ -11,9 +11,12 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// ConfigPath resolves ~/.config/ghab/config.toml, respecting
-// XDG_CONFIG_HOME.
-func ConfigPath() string {
+// configDir resolves ghab's config directory: $XDG_CONFIG_HOME/ghab,
+// or ~/.config/ghab when XDG_CONFIG_HOME is unset. Everything ghab
+// reads at startup -- config.toml, an ombre-palette.json dropped next
+// to it, styles/, the color-mode file -- lives under this one root, so
+// relocating the whole config surface is a single env var.
+func configDir() string {
 	base := os.Getenv("XDG_CONFIG_HOME")
 	if base == "" {
 		home, err := os.UserHomeDir()
@@ -22,7 +25,13 @@ func ConfigPath() string {
 		}
 		base = filepath.Join(home, ".config")
 	}
-	return filepath.Join(base, "ghab", "config.toml")
+	return filepath.Join(base, "ghab")
+}
+
+// ConfigPath resolves ~/.config/ghab/config.toml, respecting
+// XDG_CONFIG_HOME.
+func ConfigPath() string {
+	return filepath.Join(configDir(), "config.toml")
 }
 
 // Load reads and validates the config file at path. A missing file is
@@ -157,6 +166,17 @@ func mergeReadme(r *ReadmeConfig, sec map[string]interface{}, warn func(key, msg
 	prefixed := func(key, msg string) { warn("readme."+key, msg) }
 	mergeString(sec, "style_dark", &r.StyleDark, prefixed)
 	mergeString(sec, "style_light", &r.StyleLight, prefixed)
+
+	// color_mode takes exactly "auto", "dark", or "light"; anything else
+	// keeps the compiled default and warns, like every other key.
+	mode := r.ColorMode
+	mergeString(sec, "color_mode", &mode, prefixed)
+	switch mode {
+	case "auto", "dark", "light":
+		r.ColorMode = mode
+	default:
+		prefixed("color_mode", fmt.Sprintf("expected \"auto\", \"dark\", or \"light\", got %q; keeping default %q", mode, r.ColorMode))
+	}
 }
 
 func mergeBehavior(b *BehaviorConfig, sec map[string]interface{}, warn func(key, msg string)) {

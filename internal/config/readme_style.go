@@ -8,16 +8,18 @@ import (
 	"strings"
 )
 
-// ColorMode reads ~/.config/ghab/color-mode: "dark" or "light". A
-// missing file, unreadable file, or any other content falls back to "dark"
-// -- the house rule is "never pin cream on cream", and dark is the safe
-// default when the mode file can't be read (BUILD.md [readme]).
-func ColorMode() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "dark"
+// ColorMode resolves the render color mode from [readme].color_mode:
+// "dark" or "light" win outright; "auto" (the default) reads the
+// single-word mode file at <config dir>/color-mode, so a terminal theme
+// switcher can flip one file instead of rewriting TOML. A missing,
+// unreadable, or unrecognized mode file falls back to "dark" -- the
+// safe default, since light-on-light is the failure this guards.
+func ColorMode(cfg ReadmeConfig) string {
+	switch cfg.ColorMode {
+	case "dark", "light":
+		return cfg.ColorMode
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".config", "lab", "color-mode"))
+	data, err := os.ReadFile(filepath.Join(configDir(), "color-mode"))
 	if err != nil {
 		return "dark"
 	}
@@ -29,15 +31,12 @@ func ColorMode() string {
 
 // readmeAutoSearchPaths returns the "auto" search order for the glamour
 // stylesheet matching mode ("dark" or "light"):
-// <root>/ghab/styles/readme-ombre-{mode}.json for each vaultSearchRoots()
-// entry -- the same root list the palette resolver searches, per BUILD.md's
-// "[readme] auto ... via the same search roots as the palette resolver".
+// <config dir>/styles/readme-ombre-{mode}.json -- the styles/ subdir of
+// the same directory config.toml lives in. The repo ships a dark/light
+// pair under styles/ ready to copy there; [readme].style_dark and
+// [readme].style_light point anywhere else explicitly.
 func readmeAutoSearchPaths(mode string) []string {
-	var paths []string
-	for _, root := range vaultSearchRoots() {
-		paths = append(paths, filepath.Join(root, "ghab", "styles", "readme-ombre-"+mode+".json"))
-	}
-	return paths
+	return []string{filepath.Join(configDir(), "styles", "readme-ombre-"+mode+".json")}
 }
 
 // ResolveReadmeStyle resolves the glamour stylesheet path to use for mode

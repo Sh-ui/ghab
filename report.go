@@ -36,7 +36,7 @@ func printCheckConfig(path string, cfg config.Config, palette config.PaletteResu
 	fmt.Println("  [readme]")
 	fmt.Printf("    style_dark  = %s\n", cfg.Readme.StyleDark)
 	fmt.Printf("    style_light = %s\n", cfg.Readme.StyleLight)
-	fmt.Printf("    color-mode  = %s\n", colorMode)
+	fmt.Printf("    color_mode  = %-14s -> %s\n", cfg.Readme.ColorMode, colorMode)
 	if mode, ok := strings.CutPrefix(readmeStylePath, "standard:"); ok || readmeStylePath == "" {
 		if mode == "" {
 			mode = "dark"

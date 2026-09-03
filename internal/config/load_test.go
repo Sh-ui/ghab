@@ -125,3 +125,26 @@ func TestMyPRsQueryDropsBlankEntries(t *testing.T) {
 		t.Errorf("my_prs_query = %v, want the single non-blank entry", cfg.Behavior.MyPRsQueries)
 	}
 }
+
+// [readme].color_mode pins the render mode outright; anything but
+// auto/dark/light keeps the default and warns (the fail-soft contract).
+func TestReadmeColorMode(t *testing.T) {
+	cfg, warnings := loadTOML(t, "[readme]\ncolor_mode = \"light\"\n")
+	if cfg.Readme.ColorMode != "light" {
+		t.Errorf("color_mode = %q, want %q", cfg.Readme.ColorMode, "light")
+	}
+	if got := ColorMode(cfg.Readme); got != "light" {
+		t.Errorf("ColorMode() = %q, want pinned %q", got, "light")
+	}
+	if len(warnings) != 0 {
+		t.Errorf("unexpected warnings: %v", warnings)
+	}
+
+	cfg, warnings = loadTOML(t, "[readme]\ncolor_mode = \"solarized\"\n")
+	if cfg.Readme.ColorMode != "auto" {
+		t.Errorf("color_mode = %q, want default %q", cfg.Readme.ColorMode, "auto")
+	}
+	if _, ok := warningFor(warnings, "readme.color_mode"); !ok {
+		t.Errorf("expected a readme.color_mode warning, got %v", warnings)
+	}
+}

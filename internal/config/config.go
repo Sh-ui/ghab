@@ -41,6 +41,9 @@ type RawTheme struct {
 type ReadmeConfig struct {
 	StyleDark  string
 	StyleLight string
+	// ColorMode is "auto" (read <config dir>/color-mode, falling back
+	// to dark), or a pinned "dark" / "light".
+	ColorMode string
 }
 
 // BehaviorConfig is the [behavior] table. CacheTTL is stored both as the
@@ -98,6 +101,7 @@ func Defaults() Config {
 		Readme: ReadmeConfig{
 			StyleDark:  "auto",
 			StyleLight: "auto",
+			ColorMode:  "auto",
 		},
 		Behavior: BehaviorConfig{
 			CloneDir:         "~/Developer",

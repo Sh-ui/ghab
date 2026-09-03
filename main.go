@@ -58,7 +58,7 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "ghab: config warning: %s\n", w)
 	}
 
-	colorMode := config.ColorMode()
+	colorMode := config.ColorMode(cfg.Readme)
 	readmeStylePath, readmeStyleWarnings := config.ResolveReadmeStyle(cfg.Readme, colorMode)
 	for _, w := range readmeStyleWarnings {
 		fmt.Fprintf(os.Stderr, "ghab: config warning: %s\n", w)
